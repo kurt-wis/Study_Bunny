@@ -38,7 +38,7 @@ export async function summarizeTier2(rawText, chunkRecords, language) {
     content: {
       overview: response.overview ?? '',
       keyConcepts: response.keyConcepts ?? [],
-      studyOutline: response.studyOutline ?? [],
+      studyOutline: (response.studyOutline ?? []).map(name => ({ name, keywords: [] })),
       keyTopics: (response.keyConcepts ?? []).map(c => c.term),
       topSentences: [],
     },

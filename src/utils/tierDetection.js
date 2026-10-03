@@ -3,10 +3,13 @@
  * Tier names (stable): 'cloud', 'edge', 'deterministic'
  *
  * Resolution order per invocation:
- *   1. Cloud  — if API health check passes AND user hasn't forced a lower tier
+ *   1. Cloud  — configured, signed in, opted in, online, and API health check passes
  *   2. Edge   — if a ready on-device provider is registered (stretch goal; none registered in MVP)
  *   3. Deterministic — always available fallback
  */
+
+import { cloudEnabled } from './cloudSession.js';
+import { apiHealthCheck } from './apiTransport.js';
 
 export const TIER = {
   CLOUD: 'cloud',
@@ -20,10 +23,6 @@ export const TIER_LABEL = {
   [TIER.DETERMINISTIC]: 'Offline mode',
 };
 
-// Configurable API base URL — never a secret, just a deployment config.
-// Falls back to the same origin (useful when API is co-deployed).
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
-
 // In-memory health check cache (per browser session) to avoid hammering the API.
 let _lastHealthCheck = null;  // { ok: bool, ts: Date }
 const HEALTH_CACHE_MS = 30_000; // re-check every 30s
@@ -33,13 +32,13 @@ const HEALTH_CACHE_MS = 30_000; // re-check every 30s
  * Caches result for HEALTH_CACHE_MS to reduce network chatter.
  */
 export async function checkCloudHealth() {
+  if (!await cloudEnabled()) return false;
   const now = Date.now();
   if (_lastHealthCheck && now - _lastHealthCheck.ts < HEALTH_CACHE_MS) {
     return _lastHealthCheck.ok;
   }
   try {
-    const res = await fetch(`${API_BASE_URL}/api/health`, { signal: AbortSignal.timeout(5000) });
-    const ok = res.ok;
+    const ok = await apiHealthCheck();
     _lastHealthCheck = { ok, ts: now };
     return ok;
   } catch {

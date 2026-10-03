@@ -56,6 +56,12 @@ function rejectForbiddenFields(obj) {
       fail('Request contains a field that is not permitted');
     }
   }
+  // Limit every content value, including arrays in metadata, before invoking AI.
+  for (const value of Object.values(obj)) {
+    if (typeof value === 'string' && value.length > 8000) fail('Text exceeds the limit');
+    if (Array.isArray(value) && value.length > 32) fail('Too many items');
+    if (typeof value === 'number' && !Number.isFinite(value)) fail('Invalid number');
+  }
 }
 
 /**
@@ -140,8 +146,8 @@ export function validateQuiz(body) {
 
   let count = 5;
   if (body.count !== undefined) {
-    if (typeof body.count !== 'number' || !Number.isInteger(body.count) || body.count <= 0) {
-      fail('count must be a positive integer');
+    if (body.count !== 5) {
+      fail('count must be 5');
     }
     count = body.count;
   }
@@ -226,4 +232,28 @@ export function validateIntervention(body) {
     availableMaterials: body.availableMaterials,
     language: body.language,
   };
+}
+
+export function validateFeynman(body) {
+  if (!isPlainObject(body)) fail('Invalid explanation input');
+  rejectForbiddenFields(body);
+  if (Object.keys(body).some(k => !['explanation', 'topic', 'chunks'].includes(k))) fail('Unexpected field');
+  if (typeof body.explanation !== 'string' || !body.explanation.trim()) fail('Explanation is required');
+  if (body.topic != null && (typeof body.topic !== 'string' || body.topic.length > 200)) fail('Invalid topic');
+  if (!Array.isArray(body.chunks) || body.chunks.some(c => !isPlainObject(c) ||
+      !(typeof c.chunkId === 'string' || (typeof c.chunkId === 'number' && Number.isFinite(c.chunkId))))) fail('Invalid source chunks');
+  const input = validateQuiz({ chunks: body.chunks.map(c => ({ ...c, chunkId: String(c.chunkId) })) });
+  return { explanation: body.explanation, topic: body.topic ?? null, chunks: input.chunks };
+}
+
+export function validateDiagnosis(body) {
+  if (!isPlainObject(body)) fail('Invalid diagnosis input');
+  rejectForbiddenFields(body);
+  if (Object.keys(body).some(k => !['currentHabit', 'weakTopics', 'masteryHistory', 'topicType'].includes(k))) fail('Unexpected field');
+  if (body.currentHabit != null && !['rereading', 'highlighting', 'summarizing', 'flashcards', 'pomodoro', 'feynman', 'spaced_repetition'].includes(body.currentHabit)) fail('Invalid habit');
+  if (!Array.isArray(body.weakTopics) || body.weakTopics.some(t => typeof t !== 'string' || t.length > 200)) fail('Invalid topics');
+  if (!Array.isArray(body.masteryHistory) || body.masteryHistory.some(n => typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > 1)) fail('Invalid history');
+  if (body.topicType != null && (typeof body.topicType !== 'string' || body.topicType.length > 200)) fail('Invalid topic type');
+  return { currentHabit: body.currentHabit ?? null, weakTopics: body.weakTopics,
+    masteryHistory: body.masteryHistory, topicType: body.topicType ?? null };
 }

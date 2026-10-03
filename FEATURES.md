@@ -12,7 +12,7 @@ Every AI-powered feature resolves its tier **per invocation** and shows the user
 
 | Tier | Name | Powered by | Requires |
 |------|------|-----------|----------|
-| Tier 2 | **Cloud AI** | AWS Bedrock (Claude 3 Haiku) via Lambda | Internet + healthy `/api/health` |
+| Tier 2 | **Cloud AI** | Configured in-region AWS Bedrock model via Lambda | Opt-in + Cognito sign-in + internet + healthy JSON `/api/health` |
 | Tier 1 | **On-device AI** | On-device small language model (stretch goal; not registered in MVP) | Ready edge provider |
 | Tier 3 | **Offline mode** | Pure-JS deterministic algorithms (RAKE, TF-IDF, BKT) | Nothing — always available |
 
@@ -32,6 +32,24 @@ Every AI-powered feature resolves its tier **per invocation** and shows the user
 - Document + chunks persisted to **IndexedDB** (via the shared repository).
 - Graceful failure: scanned/empty/protected PDFs show a recoverable error and let the user pick another file.
 - Extraction progress is announced to screen readers via `role="status"`.
+- PDF.js and its worker are bundled and precached locally; no CDN is needed offline.
+
+### Notes checking
+
+- Open **Check notes against a reference** from a document. Select an excerpt
+  and upload a reference PDF or paste trusted source text.
+- Detect possible emails, phones, labelled student IDs/names/addresses locally;
+  add missed details manually and inspect redacted previews. Detection isn't a
+  guarantee of anonymity.
+- Compare up to 12 statements with supported/conflicting/insufficient-evidence
+  statuses. AI needs explicit preview review, opt-in and sign-in. Definitive AI
+  results require exact quotes from supplied references; source quality and
+  interpretation still require human judgment.
+- Offline mode recognizes matching complete-sentence wording only. Other
+  statements remain unverified, not labelled wrong. Cloud failures visibly fall back.
+- Last 20 sanitized checks per document persist on the device. Deleting the
+  document removes its checks and related study data. No automatic correction,
+  OCR, cloud sync, web search or independent factual certification is included.
 
 ## 3. Summarization
 
@@ -95,7 +113,7 @@ The thin layer every feature builds on (owned by the Platform Foundation spec).
 - **No credentials on the client.** The base URL is configuration, not a secret.
 
 ### Cloud backend (optional Tier 2 enhancement)
-- Node.js Lambda handlers behind API Gateway invoking Amazon Bedrock (Claude 3 Haiku).
+- Node.js 24 Lambda handlers behind authenticated API Gateway invoking the explicitly configured in-region Anthropic Bedrock model.
 - Endpoints used by Student Mode: `/api/health`, `/api/summarize`, `/api/quiz`, `/api/chat`.
 - Request validation + content-free logging; no PDF bytes, filenames, or identities accepted.
 - The app is fully functional **without** this backend — it just unlocks the richer cloud tier.
@@ -130,7 +148,7 @@ The thin layer every feature builds on (owned by the Platform Foundation spec).
 | PDF | PDF.js (`pdfjs-dist`) |
 | PWA | vite-plugin-pwa (Workbox) |
 | Offline AI | Pure-JS RAKE, TF-IDF, BKT (zero dependencies) |
-| Cloud AI (optional) | AWS Lambda + API Gateway + Bedrock (Claude 3 Haiku) |
+| Cloud AI (optional) | Cognito + AWS Lambda + API Gateway + configured Bedrock model + DynamoDB quota |
 
 ---
 

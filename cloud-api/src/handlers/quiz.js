@@ -18,6 +18,7 @@ import {
   validateQuiz as validateQuizOutput,
 } from '../lib/responseValidators.js';
 import { invokeModel as realInvokeModel } from '../lib/bedrockClient.js';
+import { enforceQuota } from '../lib/quota.js';
 
 /**
  * Build the quiz handler.
@@ -33,6 +34,7 @@ export function makeHandler({ invokeModel }) {
       methodGuard(event, 'POST');
       const body = parseJsonBody(event);
       const input = validateQuiz(body);
+      await enforceQuota(event);
       const prompt = buildQuizPrompt(input);
 
       let result;

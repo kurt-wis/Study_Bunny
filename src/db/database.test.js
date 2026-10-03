@@ -143,3 +143,37 @@ test('updateSchedule creates a scheduling row when no mastery row exists', async
   assert.equal(rows[0].interval, 1);
   assert.equal(rows[0].mastery, 0, 'mastery defaults to 0 for a schedule-only row');
 });
+
+test('version 3 preserves existing data and supports compound summary lookup', async () => {
+  const summaryId = await repo.saveSummary({ documentId: seededDocId, tier: 'deterministic', content: 'Existing summary' });
+  assert.equal((await repo.getSummary(seededDocId, 'deterministic')).id, summaryId);
+  assert.equal((await repo.getDocument(seededDocId)).title, 'Photosynthesis');
+  assert.equal(repo.default.verno, 3);
+});
+
+test('verification history is bounded, newest first, and cannot change ownership', async () => {
+  const docId = await repo.saveDocument({ title: 'History', rawText: 'Notes', chunks: [], pages: ['Page one'] });
+  assert.deepEqual((await repo.getDocument(docId)).pages, ['Page one']);
+  for (let number = 1; number <= 25; number++) {
+    await repo.saveVerificationReport(docId, { number, documentId: seededDocId, claims: [], references: [] });
+  }
+  const reports = await repo.getVerificationReports(docId);
+  assert.equal(reports.length, 20);
+  assert.deepEqual(new Set(reports.map(r => r.number)), new Set(Array.from({ length: 20 }, (_, i) => i + 6)));
+  assert.ok(reports.every(r => r.documentId === docId));
+  assert.ok(reports[0].createdAt >= reports.at(-1).createdAt);
+});
+
+test('document deletion cascades all study data and rejects stale verification saves', async () => {
+  const docId = await repo.saveDocument({ title: 'Delete fixture', rawText: 'notes', chunks: [] });
+  for (const table of ['summaries', 'quizzes', 'knowledgeState', 'chatHistory', 'studyTechniques', 'feynmanAttempts', 'verificationReports']) {
+    await repo.default[table].add({ documentId: docId });
+  }
+  await repo.deleteDocument(docId);
+  assert.equal(await repo.getDocument(docId), undefined);
+  for (const table of ['summaries', 'quizzes', 'knowledgeState', 'chatHistory', 'studyTechniques', 'feynmanAttempts', 'verificationReports']) {
+    assert.equal(await repo.default[table].where('documentId').equals(docId).count(), 0);
+  }
+  await assert.rejects(repo.saveVerificationReport(docId, { claims: [] }), /no longer exists/);
+  assert.ok(await repo.getDocument(seededDocId), 'other documents remain intact');
+});

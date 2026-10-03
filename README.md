@@ -19,30 +19,44 @@ fully offline, with optional cloud enrichment that degrades gracefully to an
   deterministic path on any failure.
 - **Local-first storage** via Dexie/IndexedDB; mastery tracked with Bayesian
   Knowledge Tracing (BKT).
+- **Check my notes**: detect and redact possible personal details, compare up to
+  12 statements with a reference PDF or pasted source, inspect evidence, and
+  keep the last 20 reports per document on this device. Offline checking matches
+  wording only; optional AI interprets agreement and conflicts with the source.
+- **Opt-in, authenticated AI**: Cognito sign-in, server-side daily allowances,
+  API throttling, and budget alerts. No AWS credentials in the browser.
 - **Accessibility baseline**: 48px touch targets, text+icon tier labels,
   live-region announcements, and non-color-only status.
 
 ## Tech stack
 
-React 18 - Vite 5 - Tailwind CSS - Dexie (IndexedDB) - PDF.js - vite-plugin-pwa.
+React 18 - Vite 7 - Tailwind CSS 4 - Dexie (IndexedDB) - PDF.js - vite-plugin-pwa.
 Tests run on Node's built-in test runner (`node --test`).
 
 ## Getting started
 
 ```sh
-npm install
+npm ci           # use Node.js 24
 npm run dev      # start the local server
 npm run build    # production build (generates the PWA service worker)
 npm test         # run the unit test suite
+npm run check:pwa # check icons and offline PDF worker after build
 ```
 
 ### Optional cloud backend
 
-The optional Tier 2 cloud API (AWS Lambda + Amazon Bedrock) lives in
-[`cloud-api/`](./cloud-api). See its README for deploy instructions. The app is
-fully functional without it. Configure the frontend with the API URL by copying
-`.env.example` to `.env.local` and setting `VITE_API_BASE_URL`; leave it blank
-to run entirely offline.
+Deploy the PWA on **Vercel**; the optional AI API remains on **AWS** in a dedicated
+project account. See [DEPLOYMENT.md](./DEPLOYMENT.md) for requirements, exact steps,
+environment variables, acceptance checks, and limitations. Leaving the four
+public cloud configuration variables blank runs entirely offline.
+
+PDF extraction runs locally, including offline after the first completed app
+load. Scanned/image-only PDFs need OCR outside this implementation. Personal-detail
+detection is heuristic, not a guarantee; manually redact missed details and review
+the sanitized preview before sending a check to AI. Results describe agreement
+with the supplied reference, **not guaranteed factual truth**. Notes aren't
+automatically rewritten. IndexedDB data is tied to the browser and app origin,
+not backed up or synchronized to a signed-in account.
 
 ## Project layout
 

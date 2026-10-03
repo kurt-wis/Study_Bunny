@@ -1,81 +1,157 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: >
-  Study Bunny cloud-api: an API Gateway HTTP API fronting four Node.js 24 Lambda
-  functions that proxy Amazon Bedrock (Claude 3 Haiku). CORS is locked to a
-  single AllowedOrigin (no wildcard), each function is granted only
-  bedrock:InvokeModel on the configured model ARN, and no secret values are
-  committed here. Model id and allowed origin are supplied as parameters at
-  deploy time. SAM CLI is not run in this sandbox; `sam validate` runs at deploy.
-
-# ---------------------------------------------------------------------------
-# Parameters — no secret values. Supplied at `sam deploy --guided` time.
-# ---------------------------------------------------------------------------
+Description: Study Bunny authenticated AI API, sign-in, quotas, and cost alerts.
 Parameters:
   BedrockModelId:
     Type: String
-    Description: >
-      Amazon Bedrock model id for the Claude 3 Haiku messages API, e.g.
-      anthropic.claude-3-haiku-20240307-v1:0. Injected as BEDROCK_MODEL_ID and
-      used to derive the least-privilege bedrock:InvokeModel resource ARN.
-    Default: anthropic.claude-3-haiku-20240307-v1:0
-    MinLength: 1
+    Description: Confirm an active in-region Anthropic InvokeModel ID before deployment. No retired-model default. Profiles require different IAM permissions.
+    AllowedPattern: 'anthropic\.[a-zA-Z0-9.:-]+'
   AllowedOrigin:
     Type: String
-    Description: >
-      Exact frontend origin allowed by CORS, e.g. https://app.example.com. No
-      wildcard is permitted. Injected as ALLOWED_ORIGIN for the CORS header.
-    MinLength: 1
+    Description: Exact Vercel production HTTPS origin without trailing slash.
+    AllowedPattern: 'https://[a-zA-Z0-9.-]+'
+  AlertEmail:
+    Type: String
+    Description: Monitored email for billing and operational alerts.
+    AllowedPattern: '[^\s@]+@[^\s@]+\.[^\s@]+'
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 10
+    MinValue: 1
+  DailyRequestLimit:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    MaxValue: 100
   LogRetentionInDays:
     Type: Number
-    Description: CloudWatch Logs retention for every function log group.
     Default: 30
-    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653]
-
-# ---------------------------------------------------------------------------
-# Globals — shared Lambda runtime/config. Node.js 24 on all functions.
-# ---------------------------------------------------------------------------
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365]
 Globals:
   Function:
+    CodeUri: ./
     Runtime: nodejs24.x
-    Architectures:
-      - arm64
+    Architectures: [arm64]
     MemorySize: 512
     Timeout: 29
     Environment:
       Variables:
-        # AWS_REGION is injected by the Lambda runtime; do not set it here.
         BEDROCK_MODEL_ID: !Ref BedrockModelId
         ALLOWED_ORIGIN: !Ref AllowedOrigin
-
+        QUOTA_TABLE: !Ref QuotaTable
+        DAILY_REQUEST_LIMIT: !Ref DailyRequestLimit
 Resources:
-  # -------------------------------------------------------------------------
-  # HTTP API — CORS restricted to the single AllowedOrigin (NO wildcard).
-  # -------------------------------------------------------------------------
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${AWS::StackName}-students'
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+  StudyScopes:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref UserPool
+      Identifier: study-bunny
+      Name: Study Bunny AI
+      Scopes:
+        - ScopeName: study
+          ScopeDescription: Use authenticated study AI endpoints
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: StudyScopes
+    Properties:
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      SupportedIdentityProviders: [COGNITO]
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, study-bunny/study]
+      CallbackURLs: [!Sub '${AllowedOrigin}/auth/callback']
+      LogoutURLs: [!Sub '${AllowedOrigin}/student']
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AccessTokenValidity: 15
+      IdTokenValidity: 15
+      RefreshTokenValidity: 1
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain: !Sub '${AWS::StackName}-${AWS::AccountId}'
+  QuotaTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+  AiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: InvokeStudyModelAndCountRequests
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}'
+              - Effect: Allow
+                Action: dynamodb:UpdateItem
+                Resource: !GetAtt QuotaTable.Arn
   HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: $default
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 5
+        ThrottlingRateLimit: 2
+        DetailedMetricsEnabled: true
       CorsConfiguration:
-        AllowOrigins:
-          - !Ref AllowedOrigin
-        AllowMethods:
-          - GET
-          - POST
-          - OPTIONS
-        AllowHeaders:
-          - Content-Type
+        AllowOrigins: [!Ref AllowedOrigin]
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowHeaders: [Content-Type, Authorization]
         MaxAge: 300
-
-  # -------------------------------------------------------------------------
-  # Functions — one per frozen route. Each is granted only
-  # bedrock:InvokeModel on the model ARN derived from BedrockModelId.
-  # -------------------------------------------------------------------------
+      Auth:
+        DefaultAuthorizer: StudentJwt
+        Authorizers:
+          StudentJwt:
+            IdentitySource: '$request.header.Authorization'
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
+              audience: [!Ref UserPoolClient]
+            AuthorizationScopes: [study-bunny/study]
   HealthFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/health.handler
-      Description: GET /api/health — liveness probe. No Bedrock access needed.
       Events:
         Health:
           Type: HttpApi
@@ -83,18 +159,12 @@ Resources:
             ApiId: !Ref HttpApi
             Method: GET
             Path: /api/health
-
+            Auth: {Authorizer: NONE}
   SummarizeFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/summarize.handler
-      Description: POST /api/summarize — study summary from anonymous text chunks.
-      Policies:
-        - Statement:
-            - Sid: InvokeBedrockModelOnly
-              Effect: Allow
-              Action: bedrock:InvokeModel
-              Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+      Role: !GetAtt AiRole.Arn
       Events:
         Summarize:
           Type: HttpApi
@@ -102,18 +172,11 @@ Resources:
             ApiId: !Ref HttpApi
             Method: POST
             Path: /api/summarize
-
   QuizFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/quiz.handler
-      Description: POST /api/quiz — generates exactly 5 questions from chunks.
-      Policies:
-        - Statement:
-            - Sid: InvokeBedrockModelOnly
-              Effect: Allow
-              Action: bedrock:InvokeModel
-              Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+      Role: !GetAtt AiRole.Arn
       Events:
         Quiz:
           Type: HttpApi
@@ -121,18 +184,11 @@ Resources:
             ApiId: !Ref HttpApi
             Method: POST
             Path: /api/quiz
-
   ChatFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/chat.handler
-      Description: POST /api/chat — grounded answer with citation-ID validation.
-      Policies:
-        - Statement:
-            - Sid: InvokeBedrockModelOnly
-              Effect: Allow
-              Action: bedrock:InvokeModel
-              Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+      Role: !GetAtt AiRole.Arn
       Events:
         Chat:
           Type: HttpApi
@@ -140,47 +196,132 @@ Resources:
             ApiId: !Ref HttpApi
             Method: POST
             Path: /api/chat
-
-  # -------------------------------------------------------------------------
-  # Log groups — explicit retention per function (content-free diagnostics).
-  # Names match the Lambda default log group so the function writes into them.
-  # -------------------------------------------------------------------------
+  FeynmanFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/feynman.handler
+      Role: !GetAtt AiRole.Arn
+      Events:
+        Feynman:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /api/feynman
+  DiagnosisFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/analyzeTechnique.handler
+      Role: !GetAtt AiRole.Arn
+      Events:
+        Diagnosis:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /api/analyze-technique
+  VerificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/verifyNotes.handler
+      Role: !GetAtt AiRole.Arn
+      Events:
+        Verification:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /api/verify-notes
   HealthLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /aws/lambda/${HealthFunction}
+      LogGroupName: !Sub '/aws/lambda/${HealthFunction}'
       RetentionInDays: !Ref LogRetentionInDays
-
   SummarizeLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /aws/lambda/${SummarizeFunction}
+      LogGroupName: !Sub '/aws/lambda/${SummarizeFunction}'
       RetentionInDays: !Ref LogRetentionInDays
-
   QuizLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /aws/lambda/${QuizFunction}
+      LogGroupName: !Sub '/aws/lambda/${QuizFunction}'
       RetentionInDays: !Ref LogRetentionInDays
-
   ChatLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /aws/lambda/${ChatFunction}
+      LogGroupName: !Sub '/aws/lambda/${ChatFunction}'
       RetentionInDays: !Ref LogRetentionInDays
-
-# ---------------------------------------------------------------------------
-# Outputs — publish the invoke URL to wire the frontend (VITE_API_BASE_URL).
-# ---------------------------------------------------------------------------
+  FeynmanLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FeynmanFunction}'
+      RetentionInDays: !Ref LogRetentionInDays
+  DiagnosisLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${DiagnosisFunction}'
+      RetentionInDays: !Ref LogRetentionInDays
+  VerificationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${VerificationFunction}'
+      RetentionInDays: !Ref LogRetentionInDays
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+  ApiFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Study Bunny API returned three server errors in five minutes.
+      Namespace: AWS/ApiGateway
+      MetricName: 5xx
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref HttpApi
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+  ProjectBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub '${AWS::StackName}-monthly'
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: {Amount: !Ref MonthlyBudgetUsd, Unit: USD}
+        CostFilters:
+          LinkedAccount: [!Ref 'AWS::AccountId']
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers: [{SubscriptionType: EMAIL, Address: !Ref AlertEmail}]
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers: [{SubscriptionType: EMAIL, Address: !Ref AlertEmail}]
 Outputs:
   ApiBaseUrl:
-    Description: >
-      HTTP API invoke URL. Use as the frontend VITE_API_BASE_URL; routes live
-      under /api (e.g. {ApiBaseUrl}/api/health).
-    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+  CognitoAuthority:
+    Value: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
+  CognitoClientId:
+    Value: !Ref UserPoolClient
+  CognitoDomain:
+    Value: !Sub 'https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com'
+  UserPoolId:
+    Value: !Ref UserPool
   AllowedOrigin:
-    Description: The single CORS origin this deployment permits.
     Value: !Ref AllowedOrigin
-  BedrockModelId:
-    Description: The Bedrock model id these functions are permitted to invoke.
-    Value: !Ref BedrockModelId

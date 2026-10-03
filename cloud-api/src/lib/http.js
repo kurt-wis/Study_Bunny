@@ -3,6 +3,7 @@
  */
 
 import { ApiError, CODES } from './errors.js';
+import { sanitizePayload } from './privacy.js';
 
 /**
  * Build an API Gateway HTTP API proxy response.
@@ -21,6 +22,7 @@ export function jsonResponse(statusCode, bodyObj, opts = {}) {
     statusCode,
     headers: {
       'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
       'Access-Control-Allow-Origin': origin,
     },
     body: JSON.stringify(bodyObj),
@@ -67,12 +69,15 @@ export function parseJsonBody(event) {
   const text = event?.isBase64Encoded
     ? Buffer.from(raw, 'base64').toString('utf8')
     : raw;
+  if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > 100000) {
+    throw new ApiError(413, CODES.PAYLOAD_TOO_LARGE, 'Request exceeds the 100 KB limit');
+  }
   try {
     const parsed = JSON.parse(text);
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new ApiError(400, CODES.VALIDATION_ERROR, 'Request body must be a JSON object');
     }
-    return parsed;
+    return sanitizePayload(parsed);
   } catch (err) {
     if (err instanceof ApiError) throw err;
     throw new ApiError(400, CODES.VALIDATION_ERROR, 'Malformed JSON request body');

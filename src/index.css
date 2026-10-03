@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss" source("./");
+@config "../tailwind.config.js";
 
 @layer base {
   html {
@@ -8,7 +7,7 @@
   }
   
   /* Ensure all interactive elements meet 48px touch target */
-  button, [role="button"], a, input, select, textarea {
+  button, [role="button"], a, input:not([type="checkbox"]):not([type="radio"]), select, textarea {
     min-height: 48px;
   }
 }

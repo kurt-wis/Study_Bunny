@@ -123,6 +123,9 @@ export default function StudentDocument() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-6">
+        <button onClick={() => navigate(`/student/document/${docId}/verify`)} className="w-full mb-4 bg-white border-2 border-indigo-200 text-indigo-700 font-semibold py-3 rounded-xl min-h-[48px]">
+          Check notes against a reference
+        </button>
         {error && <ErrorMessage message={error} onRetry={() => { setError(null); if (activeTab === 'summary') loadSummary(); }} />}
 
         {/* ── Summary Tab ─────────────────────────────────────────────── */}

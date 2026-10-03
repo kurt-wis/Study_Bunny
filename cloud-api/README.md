@@ -1,159 +1,56 @@
-# Study Bunny cloud-api
+# Study Bunny AI API
 
-A small AWS serverless backend that fronts Amazon Bedrock (Claude 3 Haiku) for
-the Study Bunny offline-first study/teaching PWA. It is an API Gateway **HTTP API**
-with five Node.js 24 Lambda functions, one per frozen route:
+AWS SAM deploys an HTTP API, seven Node.js 24 Lambda functions, Cognito OAuth
+code/PKCE sign-in, a DynamoDB allowance, log retention, operational alerts, and
+billing notifications. Deploy in the dedicated `study-bunny-prod` member account,
+not your AWS Organizations management account. See [DEPLOYMENT.md](../DEPLOYMENT.md).
 
-| Method | Path                | Purpose                                                   |
-|--------|---------------------|-----------------------------------------------------------|
-| GET    | `/api/health`       | Liveness probe (`{ status: "ok" }`); no Bedrock access.   |
-| POST   | `/api/summarize`    | Study summary from anonymous text chunks.                 |
-| POST   | `/api/quiz`         | Exactly 5 questions from chunks + weak topics.            |
-| POST   | `/api/chat`         | Grounded answer with validated citation chunkIds.         |
-| POST   | `/api/intervention` | 30-minute, 3-activity plan from anonymous group metadata. |
+| Route | Access | Purpose |
+| --- | --- | --- |
+| `GET /api/health` | Public | JSON liveness response; no model call |
+| `POST /api/summarize` | Student JWT + scope | Note-based summary |
+| `POST /api/quiz` | Student JWT + scope | Five quiz questions |
+| `POST /api/chat` | Student JWT + scope | Grounded note Q&A |
+| `POST /api/feynman` | Student JWT + scope | Explanation coverage and gaps |
+| `POST /api/analyze-technique` | Student JWT + scope | Implemented study-method recommendation |
+| `POST /api/verify-notes` | Student JWT + scope + review consent | Reference-based claim checking |
 
-`/api/generate-items` is **deferred** for the MVP and is intentionally not
-implemented or routed.
+No teacher/intervention route is deployed. Legacy helpers are not live capabilities.
 
-## Privacy guarantees
+## Privacy and limits
 
-- **Anonymous content only.** Handlers accept text chunks, questions, and
-  anonymous group metadata. PII-looking fields (filenames, student names,
-  classroom ids, raw PDF bytes, etc.) are rejected at the Lambda boundary with
-  `400 VALIDATION_ERROR`.
-- **Content-free logging.** The diagnostic logger can only emit
-  `{ handler, httpStatus, latencyMs, timestamp }`. Chunk text, questions,
-  prompts, and secrets cannot flow through it.
-- **No secrets committed.** Configuration is injected via environment variables
-  (`BEDROCK_MODEL_ID`, `ALLOWED_ORIGIN`); `AWS_REGION` is provided by the Lambda
-  runtime. `template.yaml` holds no secret values. `.env` and build artifacts
-  are git-ignored.
-- **Errors never leak.** Error responses are exactly `{ error, code }` with a
-  generic message — no stack traces, prompt text, chunk text, or secrets.
+Only extracted study text and anonymous study signals go to the API; original
+PDFs and document titles stay local. Shared heuristics redact emails, phone
+numbers, labelled IDs/names/addresses on client and server. Unlabelled or unusual
+personal details can still be missed. Do not promise complete anonymization.
+Diagnostic logs contain only handler, status, latency and timestamp. The stack
+does not enable Bedrock invocation-content logging; verify account-level settings.
 
-## Architecture
+Bodies are limited to 100 KB. Six AI routes share a default allowance of 20
+requests per user per UTC day, counted atomically before model invocation. A
+failed model request still counts; its one validation retry does not count twice.
+Requests stop if the quota service fails. API Gateway enforces JWT scope; the
+quota path requires a subject. Keep `QUOTA_TABLE` configured in production; its
+absence is only supported for local tests. Budget alerts are not spending caps.
 
-Each handler follows one pipeline: validate the JSON body at the boundary →
-build the prompt → call the injected `invokeModel` (Bedrock seam) → parse and
-validate the model's JSON output. Bad model JSON is retried **once**, then the
-request fails with `502 UPSTREAM_ERROR`. Amazon Bedrock access is behind a
-dependency-injection seam (`src/lib/bedrockClient.js`), so tests inject a stub
-and never touch the network or the AWS SDK.
+Verification accepts 1–12 claims and 1–24 reference passages. Every claim ID must
+appear exactly once. Supported/contradicted results need quotes present in the
+selected source; missing/fabricated quotes downgrade them to insufficient evidence.
+This validates provenance, not semantic entailment or source accuracy. AI can
+misinterpret a genuine quote; users must inspect the evidence. Prompts treat all
+supplied text as untrusted data, never instructions.
 
-Status mapping: `200` ok · `400 VALIDATION_ERROR` · `405 METHOD_NOT_ALLOWED`
-(non-GET on health) · `502 UPSTREAM_ERROR` (model failure / timeout /
-unparsable output).
+## Development
 
-## Prerequisites
+Use Node.js 24, `npm ci`, and `npm test` here. Root `npm test` includes frontend
+and backend tests. Unit tests inject model/quota stubs and never send content to AWS.
 
-- AWS account with Amazon Bedrock access enabled and the Claude 3 Haiku model
-  granted in the target region.
-- [AWS CLI](https://aws.amazon.com/cli/) configured with credentials.
-- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html).
-- Node.js (local tests run on Node 18+; the deploy target runtime is Node.js 24).
+Model configuration supports **in-region Anthropic InvokeModel** IDs with exact,
+model-specific IAM permission. There is no default: confirm current regional
+availability and account access. Inference profiles, Mantle, and other providers
+need an explicit integration/IAM change; do not silently route content globally.
 
-> **This sandbox performs NO live deploy.** The SAM CLI is not installed here and
-> must not be run. `template.yaml` is deploy-ready configuration validated by
-> parsing and manual review; `sam validate` runs at deploy time (next section).
-> The test suite (`node --test`) needs **no network and no AWS credentials** —
-> Bedrock is stubbed through the injection seam.
-
-## Deploy
-
-Run these from the `cloud-api/` directory.
-
-```sh
-# 1. (optional) validate the template — runs at deploy time, not in this sandbox
-sam validate
-
-# 2. build the Lambda bundles
-sam build
-
-# 3. first deploy, interactive
-sam deploy --guided
-```
-
-During `sam deploy --guided` you will be prompted for the stack name, region,
-and the template parameters:
-
-- **BedrockModelId** — the Claude 3 Haiku model id for your region, e.g.
-  `anthropic.claude-3-haiku-20240307-v1:0`. The function IAM policy is scoped to
-  `bedrock:InvokeModel` on exactly this model's ARN
-  (`arn:aws:bedrock:<region>::foundation-model/<BedrockModelId>`).
-- **AllowedOrigin** — the exact frontend origin for CORS, e.g.
-  `https://your-app.example.com`. No wildcard is allowed. Use the Amplify app URL
-  (see below) once it is known; redeploy to update it.
-
-SAM saves these answers to `samconfig.toml`, so later deploys are just:
-
-```sh
-sam build && sam deploy
-```
-
-### Read the invoke URL
-
-After a successful deploy, read the HTTP API invoke URL from the stack outputs:
-
-```sh
-aws cloudformation describe-stacks \
-  --stack-name <your-stack-name> \
-  --query "Stacks[0].Outputs[?OutputKey=='ApiBaseUrl'].OutputValue" \
-  --output text
-```
-
-`sam deploy` also prints the `ApiBaseUrl` output at the end of a run. Routes live
-under `/api`, e.g. `GET {ApiBaseUrl}/api/health`.
-
-## Wire the frontend
-
-The frontend reads its API base URL from the build-time env var
-`VITE_API_BASE_URL` (see `src/utils/apiTransport.js`, which is the
-contract and must **not** be edited). This value is deployment configuration,
-not a secret, and no credentials are sent by the client.
-
-1. Copy the example env file in the frontend project:
-
-   ```sh
-   cd ..  # the frontend is the repo root
-   cp .env.example .env.local
-   ```
-
-2. Set `VITE_API_BASE_URL` to the `ApiBaseUrl` output from the deploy, e.g.:
-
-   ```
-   VITE_API_BASE_URL=https://abc123.execute-api.ap-southeast-1.amazonaws.com
-   ```
-
-3. Rebuild the frontend so Vite inlines the value.
-
-Do **not** edit `src/utils/apiTransport.js` — only set the env var.
-
-## Host the frontend on AWS Amplify
-
-1. Connect the frontend app to AWS Amplify Hosting (Git-based build or manual
-   deploy of the Vite `dist/` output).
-2. Set `VITE_API_BASE_URL` as an Amplify build environment variable to the
-   `ApiBaseUrl` from the stack outputs.
-3. After Amplify assigns the app URL, set the backend stack's **AllowedOrigin**
-   parameter to that exact origin and redeploy the backend so CORS permits it.
-4. Publish both URLs to the team: the **API URL** (`ApiBaseUrl`) and the **app
-   URL** (the Amplify domain).
-
-## Local tests
-
-No build or transpile step. From `cloud-api/`:
-
-```sh
-node --test
-```
-
-The full suite passes with **no network access and no AWS credentials**: every
-handler test injects a Bedrock stub (`test/helpers/fakeBedrock.js`) and the real
-client path (`src/lib/bedrockClient.js`) is never imported by tests. Optional:
-`npm install` pulls `@aws-sdk/client-bedrock-runtime`, used only by the real
-client path at deploy/runtime, never by tests.
-
-## Repository hygiene
-
-`.gitignore` keeps `node_modules/`, `.env`, `.aws-sam/`, and `*.log` out of
-source control. `.env.example` lists only variable names, never values.
+Errors return generic `{ error, code }`, never prompts/stacks. Statuses include
+400 input, 401 sign-in, 405 method, 413 size, 429 quota/throttle, 502 model failure.
+Model calls have 12-second timeouts and at most one retry; quota calls have a
+2-second timeout. Clients gracefully fall back to local tools.

@@ -4,6 +4,7 @@ import { saveDocument, getAllDocuments, deleteDocument } from '../../db/database
 import { processDocument } from '../../utils/documentProcessor.js';
 import LoadingSpinner from '../../components/shared/LoadingSpinner.jsx';
 import ErrorMessage from '../../components/shared/ErrorMessage.jsx';
+import CloudAccessPanel from '../../components/shared/CloudAccessPanel.jsx';
 
 export default function StudentHome() {
   const navigate = useNavigate();
@@ -32,6 +33,7 @@ export default function StudentHome() {
   }
 
   async function handleFile(file) {
+    if (uploading) return;
     if (!file || file.type !== 'application/pdf') {
       setError('Please upload a PDF file.');
       return;
@@ -56,6 +58,8 @@ export default function StudentHome() {
       setError(err.message || 'Failed to process PDF. Please try another file.');
       setUploading(false);
       setProgress(null);
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -93,6 +97,7 @@ export default function StudentHome() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-6">
+        <CloudAccessPanel />
         {/* Upload zone */}
         <div
           className={`border-2 border-dashed rounded-2xl p-8 text-center mb-6 transition-colors ${
@@ -147,18 +152,17 @@ export default function StudentHome() {
           <div className="space-y-3">
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Your Notes</h2>
             {documents.map(doc => (
-              <button
+              <div
                 key={doc.id}
-                onClick={() => navigate(`/student/document/${doc.id}`)}
                 className="w-full bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow border border-gray-100 text-left flex items-center gap-4 group"
               >
                 <div className="text-2xl">📄</div>
-                <div className="flex-1 min-w-0">
+                <button className="flex-1 min-w-0 text-left min-h-[48px]" onClick={() => navigate(`/student/document/${doc.id}`)}>
                   <div className="font-semibold text-gray-800 truncate group-hover:text-indigo-700">{doc.title}</div>
                   <div className="text-gray-400 text-sm mt-0.5">
                     {doc.chunks?.length ?? 0} chunks · {formatDate(doc.createdAt)}
                   </div>
-                </div>
+                </button>
                 <button
                   onClick={e => onDelete(e, doc.id)}
                   className="text-gray-300 hover:text-red-400 transition-colors text-lg min-h-[48px] min-w-[48px] flex items-center justify-center"
@@ -166,7 +170,7 @@ export default function StudentHome() {
                 >
                   🗑
                 </button>
-              </button>
+              </div>
             ))}
           </div>
         )}

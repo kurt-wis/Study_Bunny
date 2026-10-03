@@ -21,6 +21,7 @@ import {
   validateChat as validateChatOutput,
 } from '../lib/responseValidators.js';
 import { invokeModel as realInvokeModel } from '../lib/bedrockClient.js';
+import { enforceQuota } from '../lib/quota.js';
 
 /**
  * Build the chat handler.
@@ -36,6 +37,7 @@ export function makeHandler({ invokeModel }) {
       methodGuard(event, 'POST');
       const body = parseJsonBody(event);
       const input = validateChat(body);
+      await enforceQuota(event);
       const prompt = buildChatPrompt(input);
       const allowedChunkIds = new Set(input.chunks.map((c) => c.chunkId));
 

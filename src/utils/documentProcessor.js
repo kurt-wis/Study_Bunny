@@ -5,13 +5,13 @@
  */
 
 // PDF.js worker must be configured before use
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 let pdfjsLib = null;
 
 async function getPdfjsLib() {
   if (pdfjsLib) return pdfjsLib;
   const pdfjs = await import('pdfjs-dist');
-  // Set worker URL — use CDN for worker to avoid bundling the large worker file
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
   pdfjsLib = pdfjs;
   return pdfjs;
 }
@@ -25,31 +25,39 @@ async function getPdfjsLib() {
  * @returns {Promise<{ rawText: string, pages: string[] }>}
  */
 export async function extractTextFromPDF(file, onProgress) {
+  if (!file || !(file.type === 'application/pdf' || /\.pdf$/i.test(file.name ?? ''))) throw new Error('Please choose a PDF file.');
+  if (file.size > 20 * 1024 * 1024) throw new Error('Choose a PDF smaller than 20 MB.');
   const pdfjs = await getPdfjsLib();
   const arrayBuffer = await file.arrayBuffer();
   const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
-  const pdf = await loadingTask.promise;
-
-  const pageCount = pdf.numPages;
-  const pages = [];
-  for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
-    const page = await pdf.getPage(pageNum);
-    const textContent = await page.getTextContent();
-    const pageText = textContent.items
-      .map(item => item.str)
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (pageText) pages.push(pageText);
-    onProgress?.({ stage: 'extracting', page: pageNum, pageCount });
+  try {
+    const pdf = await loadingTask.promise;
+    const pageCount = pdf.numPages;
+    if (pageCount > 300) throw new Error('Choose a PDF with 300 pages or fewer.');
+    const pages = [];
+    let characterCount = 0;
+    for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map(item => item.str)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      pages.push(pageText); // Keep empty pages so later page references stay correct.
+      characterCount += pageText.length;
+      page.cleanup();
+      if (characterCount > 1000000) throw new Error('This PDF contains too much text. Split it into smaller files.');
+      onProgress?.({ stage: 'extracting', page: pageNum, pageCount });
+    }
+    const rawText = pages.join('\n\n');
+    if (!rawText.trim()) {
+      throw new Error('No readable text found in this PDF. It may be a scanned image or protected document.');
+    }
+    return { rawText, pages };
+  } finally {
+    await loadingTask.destroy();
   }
-
-  const rawText = pages.join('\n\n');
-  if (!rawText.trim()) {
-    throw new Error('No readable text found in this PDF. It may be a scanned image or protected document.');
-  }
-
-  return { rawText, pages };
 }
 
 /**

@@ -4,6 +4,8 @@ cloud-api/node_modules/
 
 # ---- Build output ----
 dist/
+public/pwa-*.png
+public/apple-touch-icon.png
 build/
 *.local
 
@@ -19,9 +21,12 @@ cloud-api/.env.*
 .aws-sam/
 cloud-api/.aws-sam/
 samconfig.toml
+.vercel/
 
 # ---- Test / coverage ----
 coverage/
+.codex-tools/
+test-results/
 
 # ---- Logs ----
 *.log

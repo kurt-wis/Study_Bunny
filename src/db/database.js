@@ -43,12 +43,19 @@ db.version(2).stores({
   });
 });
 
+// Version 3 preserves all existing records, adds verification history and the
+// summary index previously queried via an exception-based fallback.
+db.version(3).stores({
+  summaries: '++id, documentId, tier, [documentId+tier], createdAt',
+  verificationReports: '++id, documentId, createdAt',
+});
+
 export default db;
 
 // ─── Documents ───────────────────────────────────────────────────────────────
 
-export async function saveDocument({ title, rawText, chunks, createdAt }) {
-  return db.documents.add({ title, rawText, chunks, createdAt: createdAt ?? new Date() });
+export async function saveDocument({ title, rawText, chunks, pages = [], createdAt }) {
+  return db.documents.add({ title, rawText, chunks, pages, createdAt: createdAt ?? new Date() });
 }
 
 export async function getDocument(documentId) {
@@ -60,12 +67,15 @@ export async function getAllDocuments() {
 }
 
 export async function deleteDocument(documentId) {
-  await db.transaction('rw', [db.documents, db.summaries, db.quizzes, db.knowledgeState, db.chatHistory], async () => {
+  await db.transaction('rw', [db.documents, db.summaries, db.quizzes, db.knowledgeState, db.chatHistory, db.studyTechniques, db.feynmanAttempts, db.verificationReports], async () => {
     await db.documents.delete(documentId);
     await db.summaries.where('documentId').equals(documentId).delete();
     await db.quizzes.where('documentId').equals(documentId).delete();
     await db.knowledgeState.where('documentId').equals(documentId).delete();
     await db.chatHistory.where('documentId').equals(documentId).delete();
+    await db.studyTechniques.where('documentId').equals(documentId).delete();
+    await db.feynmanAttempts.where('documentId').equals(documentId).delete();
+    await db.verificationReports.where('documentId').equals(documentId).delete();
   });
 }
 
@@ -257,4 +267,19 @@ export async function getSetting(key, defaultValue = null) {
 
 export async function setSetting(key, value) {
   return db.appSettings.put({ key, value });
+}
+
+export async function saveVerificationReport(documentId, report) {
+  return db.transaction('rw', [db.documents, db.verificationReports], async () => {
+    if (!await db.documents.get(documentId)) throw new Error('Document no longer exists');
+    const id = await db.verificationReports.add({ ...report, documentId, createdAt: new Date() });
+    const older = await db.verificationReports.where('documentId').equals(documentId).reverse().sortBy('id');
+    await db.verificationReports.bulkDelete(older.slice(20).map(r => r.id));
+    return id;
+  });
+}
+
+export async function getVerificationReports(documentId) {
+  const rows = await db.verificationReports.where('documentId').equals(documentId).sortBy('createdAt');
+  return rows.reverse();
 }

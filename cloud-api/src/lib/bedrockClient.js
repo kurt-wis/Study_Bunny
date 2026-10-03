@@ -1,7 +1,7 @@
 /**
  * Amazon Bedrock injection seam.
  *
- * This module holds the ONLY real-network code path. Handlers are authored as
+ * This module holds the model-inference network path (quotas use DynamoDB separately). Handlers are authored as
  * makeHandler({ invokeModel }); the Lambda entry wires `invokeModel` from here,
  * while tests inject a stub (test/helpers/fakeBedrock.js). Tests must never
  * import this module, so the AWS SDK is loaded lazily and only on first real use.
@@ -22,7 +22,7 @@ export function createBedrockClient() {
   if (!clientPromise) {
     clientPromise = import('@aws-sdk/client-bedrock-runtime').then(
       ({ BedrockRuntimeClient }) =>
-        new BedrockRuntimeClient({ region: process.env.AWS_REGION }),
+        new BedrockRuntimeClient({ region: process.env.AWS_REGION, maxAttempts: 1 }),
     );
   }
   return clientPromise;
@@ -57,7 +57,7 @@ export function createInvokeModel() {
       body: JSON.stringify(payload),
     });
 
-    const response = await client.send(command);
+    const response = await client.send(command, { abortSignal: AbortSignal.timeout(12000) });
     const decoded = JSON.parse(new TextDecoder().decode(response.body));
     const text = Array.isArray(decoded?.content)
       ? decoded.content.map((part) => part?.text ?? '').join('')

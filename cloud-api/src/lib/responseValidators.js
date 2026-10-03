@@ -30,6 +30,20 @@ function isObj(obj) {
   return obj !== null && typeof obj === 'object' && !Array.isArray(obj);
 }
 
+export function validateFeynman(obj) {
+  if (!isObj(obj) || typeof obj.coverage !== 'number' || !Number.isFinite(obj.coverage) || obj.coverage < 0 || obj.coverage > 1 ||
+      ![obj.covered, obj.gaps].every(list => Array.isArray(list) && list.length <= 40 && list.every(s => typeof s === 'string' && s.length <= 200)) ||
+      typeof obj.feedback !== 'string' || obj.feedback.length > 4000) throw new Error('Invalid Feynman output');
+  return { coverage: obj.coverage, covered: obj.covered, gaps: obj.gaps, feedback: obj.feedback };
+}
+
+export function validateDiagnosis(obj, input) {
+  if (!isObj(obj) || !['feynman', 'spaced_repetition'].includes(obj.recommended_technique) ||
+      obj.recommended_technique === input.currentHabit || typeof obj.analysis !== 'string' || !obj.analysis.trim() || obj.analysis.length > 2000 ||
+      typeof obj.expected_improvement !== 'string' || obj.expected_improvement.length > 1000) throw new Error('Invalid diagnosis output');
+  return { recommended_technique: obj.recommended_technique, analysis: obj.analysis, expected_improvement: obj.expected_improvement };
+}
+
 /**
  * @param {unknown} obj
  * @returns {{ overview: string, keyConcepts: object[], studyOutline: string[] }}

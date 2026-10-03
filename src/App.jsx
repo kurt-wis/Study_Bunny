@@ -8,6 +8,8 @@ import StudentQuiz from './pages/student/StudentQuiz.jsx';
 import StudentChat from './pages/student/StudentChat.jsx';
 import StudentReview from './pages/student/StudentReview.jsx';
 import StudentDashboard from './pages/student/StudentDashboard.jsx';
+import StudentVerify from './pages/student/StudentVerify.jsx';
+import AuthCallback from './pages/AuthCallback.jsx';
 
 export default function App() {
   return (
@@ -23,6 +25,8 @@ export default function App() {
         <Route path="/student/document/:id/chat" element={<StudentChat />} />
         <Route path="/student/document/:id/review" element={<StudentReview />} />
         <Route path="/student/document/:id/dashboard" element={<StudentDashboard />} />
+        <Route path="/student/document/:id/verify" element={<StudentVerify />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/student" replace />} />

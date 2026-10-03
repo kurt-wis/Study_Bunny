@@ -17,6 +17,7 @@ import {
   validateSummarize as validateSummarizeOutput,
 } from '../lib/responseValidators.js';
 import { invokeModel as realInvokeModel } from '../lib/bedrockClient.js';
+import { enforceQuota } from '../lib/quota.js';
 
 /**
  * Build the summarize handler.
@@ -32,6 +33,7 @@ export function makeHandler({ invokeModel }) {
       methodGuard(event, 'POST');
       const body = parseJsonBody(event);
       const input = validateSummarize(body);
+      await enforceQuota(event);
       const prompt = buildSummarizePrompt(input);
 
       let result;
