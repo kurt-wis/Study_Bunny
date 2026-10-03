@@ -74,26 +74,33 @@ build. Requirement references point back to `requirements.md`.
   - _Requirements: 7.1–7.4_
 
 - [ ] 10. Cloud API endpoints (optional Tier 2) — gated on review decision #3
-  - `cloud-api/src/handlers/feynman.js` and `analyzeTechnique.js` following the existing
-    handler/validation/logger/responseValidator pattern; chunks/metadata only.
+  - [x] `cloud-api/src/handlers/feynman.js` and `analyzeTechnique.js` with request limits,
+    anonymous inputs, prompt builders, response validation, retries, and content-free logs.
+  - [x] `template.yaml`: add both least-privilege functions, log groups, bounded API
+    throttling, and stage access logs.
+  - [ ] Add handler tests (happy/400/502 + content-free logging sweep).
   - Validate `recommended_technique` to the in-scope set; coerce out-of-scope values.
-  - `template.yaml`: add the two least-privilege functions + log groups.
-  - Extend `cloud-api/test` (happy/400/502 + content-free logging sweep).
   - _Requirements: 3.4, 3.7, 6.3, 8.4_
 
-- [x] 11. Accessibility + tier-badge pass
+- [ ] 11. Accessibility + tier-badge pass
   - Confirm 48×48 targets, WCAG AA contrast, text+icon tier labels, and live-region
     announcements across the new Review, Dashboard, Pomodoro, and Feynman screens.
   - Verify effective-tier badge (never preference) on every technique screen.
   - _Requirements: 8.1, 8.3, and FEATURES.md §9 baseline_
 
-- [x] 12. End-to-end verification
-  - `npm run build` clean; `cloud-api` tests green (≥ existing 48).
-  - Airplane-mode walkthrough: all three techniques usable offline; Feynman + diagnosis
-    fall back to "Offline mode" when cloud is forced to fail.
-  - Upgrade check: an existing v1 database opens, keeps its documents/mastery, and gains
-    SM-2 fields.
+- [ ] 12. End-to-end verification
+  - [x] AWS frontend/backend deployment configuration and offline PDF worker are present.
+  - [x] Production build completed successfully (`npm run build`).
+  - [ ] Cloud API unit suite, airplane-mode walkthrough, migration check, and live AWS
+    deployment completed.
   - _Requirements: 4.6, 8.1, 8.2, 9.1_
+
+- [x] 13. AWS deployment configuration
+  - Add Amplify build settings and an SPA route-rewrite file/command.
+  - Add SAM routes for Feynman and technique diagnosis, plus API throttling and bounded
+    request sizes; document the Amplify-to-SAM deployment sequence.
+  - Bundle the PDF.js worker and provide PWA icon assets required by the manifest.
+  - _Requirements: AWS deploy readiness_
 
 ## Build order / dependencies
 

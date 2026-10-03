@@ -67,6 +67,9 @@ export function parseJsonBody(event) {
   const text = event?.isBase64Encoded
     ? Buffer.from(raw, 'base64').toString('utf8')
     : raw;
+  if (Buffer.byteLength(text, 'utf8') > 1024 * 1024) {
+    throw new ApiError(413, CODES.PAYLOAD_TOO_LARGE, 'Request body is too large');
+  }
   try {
     const parsed = JSON.parse(text);
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {

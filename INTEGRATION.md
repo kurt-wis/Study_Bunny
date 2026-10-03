@@ -1,228 +1,114 @@
-# Study Bunny — Platform Foundation Integration Note
+# Study Bunny — current platform contract
 
-**Contract version: 1.0.0** (frozen for the hackathon MVP)
+**Contract version: 1.1.0.** This describes the student-mode implementation and
+the additive learning-technique work. The current product scope is defined by
+`.kiro/specs/learning-techniques/requirements.md`; the v5 app specification is
+an earlier, broader proposal. Teacher/classroom mode is not part of this build.
 
-This document is the handoff from the Platform Foundation spec to the feature specs
-(Student Study Mode, Teacher/Assessment, Chat, and Cloud). The contracts below are
-**frozen**: feature code depends on them and must not fork them. Any change to a
-signature, store name, index, or endpoint shape requires updating this file **and**
-every consuming spec before the change lands (see "Breaking-change policy").
+The codebase uses JavaScript/JSX. Keep feature reads and writes behind
+`src/db/database.js`; schema migrations must be additive and versioned.
 
-Language note: the codebase is **JavaScript / JSX** throughout. The design document's
-TypeScript interfaces are shape documentation only — they are expressed here and in the
-source as JSDoc on plain JS modules. Do **not** introduce `.ts`/`.tsx` files or a
-`tsconfig`.
+## 1. Local data — `src/db/database.js`
 
----
+The Dexie database is named `StudyBunnyDB`, schema version 2. All user data stays
+in IndexedDB; this product has no accounts, sync, or remote database.
 
-## 1. Dexie Data Layer — `src/db/database.js`
+| Store | Primary key | Indexes |
+|---|---|---|
+| `documents` | `++id` | `title`, `createdAt` |
+| `summaries` | `++id` | `documentId`, `tier`, `createdAt` |
+| `quizzes` | `++id` | `documentId`, `tier`, `createdAt` |
+| `knowledgeState` | `++id` | `documentId`, `topic`, `[documentId+topic]`, `nextReviewDate` |
+| `chatHistory` | `++id` | `documentId`, `timestamp` |
+| `appSettings` | `key` | — |
+| `studyTechniques` | `++id` | `documentId` |
+| `feynmanAttempts` | `++id` | `documentId`, `topic`, `createdAt` |
 
-A single Dexie database named **`StudyBunnyDB`**, schema **version 1**. Features must route
-every write and read through the exported helpers below. Features must **not** call
-`new Dexie(...)` or open their own connection.
+The version 2 migration adds the two technique stores and the SM-2
+`nextReviewDate` index/fields; it preserves version 1 records. `interval`,
+`easeFactor`, `repetitions`, and `nextReviewDate` are additive fields on
+`knowledgeState` records.
 
-### 1.1 Stores (10)
+### Repository helpers
 
-| Store | Primary key | PK type | Indexes |
-|-------|-------------|---------|---------|
-| `documents` | `++id` | auto-increment number | `title`, `createdAt` |
-| `summaries` | `++id` | auto-increment number | `documentId`, `tier`, `createdAt` |
-| `quizzes` | `++id` | auto-increment number | `documentId`, `tier`, `createdAt` |
-| `knowledgeState` | `++id` | auto-increment number | `documentId`, `topic`, `[documentId+topic]` (compound) |
-| `chatHistory` | `++id` | auto-increment number | `documentId`, `timestamp` |
-| `classrooms` | `++id` | auto-increment number | `grade`, `section`, `createdAt` |
-| `students` | `++id` | auto-increment number | `classroomId`, `name` |
-| `assessments` | `++id` | auto-increment number | `studentId`, `classroomId`, `completedAt` |
-| `interventionPlans` | `++id` | auto-increment number | `classroomId`, `groupName`, `tier`, `createdAt` |
-| `appSettings` | `key` | **string** (named PK, not auto-increment) | — |
+- Documents: `saveDocument({ title, rawText, chunks, pages, createdAt })`,
+  `getDocument(id)`, `getAllDocuments()` (newest first),
+  `deleteDocument(id)` (cascades through every document-owned store).
+- Summaries: `saveSummary(...)`, `getSummary(documentId, tier)`.
+- Quizzes: `saveQuiz(...)`, `getQuizzesByDocument(id)` (newest first),
+  `updateQuizScore(id, score, { masteryBefore, masteryAfter })`,
+  `tagQuizSource(id, { source, technique })`.
+- Knowledge: `getKnowledgeState(id)`, `updateKnowledgeState(id, topic, mastery)`,
+  `getDueTopics(id, now)`, `updateSchedule(id, topic, schedule)`.
+- Techniques: `getStudyTechnique(id)`, `setStudyTechnique(id, technique)`.
+- Feynman: `saveFeynmanAttempt(attempt)`, `getFeynmanAttempts(id, topic?)`.
+- Chat/settings: `saveChatMessage(...)`, `getChatHistory(id)`, `getSetting(key)`,
+  `setSetting(key, value)`.
 
-The foundation defines store **structure** (keys + indexes). Record **field shapes** are
-owned by the consuming feature spec and must be agreed with that spec before use.
+Quiz and Feynman attempt records can carry `masteryBefore` and `masteryAfter`.
+The Dashboard uses those BKT values for mastery change; older quiz records with
+no BKT snapshot are labelled as historical quiz accuracy.
 
-### 1.2 Exported LocalRepository functions
+## 2. Tier resolution — `src/utils/tierDetection.js`
 
-Default export: `db` (the Dexie instance; use only when a helper does not yet exist).
+Stable values are `cloud`, `edge`, and `deterministic`, labelled Cloud AI,
+On-device AI, and Offline mode. `resolveTier({ feature, preference })` runs per
+feature invocation. Cloud health is cached for 30 seconds; there is no registered
+edge model in this MVP. A cloud request failure falls back inside the feature
+orchestrator to the deterministic path.
 
-Documents
-- `saveDocument({ title, rawText, chunks, createdAt }) -> Promise<number>`
-- `getDocument(documentId) -> Promise<object|undefined>`
-- `getAllDocuments() -> Promise<object[]>` (newest first)
-- `deleteDocument(documentId) -> Promise<void>` (cascades to summaries, quizzes, knowledgeState, chatHistory)
+## 3. API transport and privacy
 
-Summaries
-- `saveSummary({ documentId, tier, content, format, createdAt }) -> Promise<number>`
-- `getSummary(documentId, tier) -> Promise<object|undefined>`
+`VITE_API_BASE_URL` is a build-time URL, not a secret. `apiPost(path, body)` sends
+JSON; `apiHealthCheck()` calls `GET /api/health`. No client credentials are sent.
 
-Quizzes
-- `saveQuiz({ documentId, tier, questions, score, completedAt, createdAt }) -> Promise<number>`
-- `getQuizzesByDocument(documentId) -> Promise<object[]>` (newest first)
-- `updateQuizScore(quizId, score) -> Promise<number>`
+The browser may send extracted note chunks for summaries, quizzes, and chat; the
+Feynman route also receives an explanation and a non-identifying topic label.
+The API must never receive PDF bytes, filenames, document IDs, student identity,
+or classroom identity. Technique analysis receives only habit/topic labels and
+bounded mastery values. Lambda diagnostic logs do not include request or model
+content.
 
-Knowledge state (BKT)
-- `getKnowledgeState(documentId) -> Promise<Record<topic, { mastery, updatedAt }>>`
-- `updateKnowledgeState(documentId, topic, mastery) -> Promise<number>` (upsert via `[documentId+topic]`)
+## 4. Cloud routes
 
-Chat history
-- `saveChatMessage({ documentId, role, content, citations, tier }) -> Promise<number>`
-- `getChatHistory(documentId) -> Promise<object[]>` (oldest first, by timestamp)
+Base URL is `VITE_API_BASE_URL`. The API request limits are a 1 MiB body, no more
+than 100 chunks, 12,000 characters per chunk, 220,000 total chunk characters,
+and endpoint-specific bounds on explanation, question, and metadata fields.
+API Gateway has best-effort default throttling targets of 5 requests/second and
+a burst of 10.
 
-Classrooms
-- `saveClassroom({ name, grade, section, createdAt }) -> Promise<number>`
-- `getClassroom(classroomId) -> Promise<object|undefined>`
-- `getAllClassrooms() -> Promise<object[]>` (newest first)
-- `deleteClassroom(classroomId) -> Promise<void>` (cascades to students, assessments, interventionPlans)
+| Method | Path | Request shape |
+|---|---|---|
+| GET | `/api/health` | — |
+| POST | `/api/summarize` | `{ chunks: [{ text, page? }], language? }` |
+| POST | `/api/quiz` | `{ chunks: [{ chunkId, text }], weakTopics, count }` |
+| POST | `/api/chat` | `{ question, chunks: [{ chunkId, text, page? }] }` |
+| POST | `/api/feynman` | `{ explanation, topic?, chunks: [{ chunkId, text }] }` |
+| POST | `/api/analyze-technique` | `{ currentHabit?, weakTopics, masteryHistory, topicType? }` |
 
-Students
-- `saveStudent({ classroomId, name, gender, createdAt }) -> Promise<number>`
-- `getStudentsByClassroom(classroomId) -> Promise<object[]>`
-- `getStudent(studentId) -> Promise<object|undefined>`
-- `deleteStudent(studentId) -> Promise<void>` (cascades to assessments)
+`/api/feynman` returns `coverage`, `covered`, `gaps`, and `feedback`.
+`/api/analyze-technique` may recommend only `feynman` or `spaced_repetition`.
+The SAM template currently deploys only these student-mode routes; there is no
+intervention or teacher endpoint.
 
-Assessments
-- `saveAssessment({ studentId, classroomId, skillProfile, philIriLevel, responses, durationMs, completedAt }) -> Promise<number>`
-- `getLatestAssessment(studentId) -> Promise<object|null>`
-- `getAssessmentsByClassroom(classroomId) -> Promise<object[]>` (newest first)
+CORS allows one exact Amplify origin. It is a browser-origin policy, not API
+authentication. The current no-account product leaves the HTTP API publicly
+invokable; the rate targets and request bounds do not provide a hard spend cap.
 
-Intervention plans
-- `saveInterventionPlan({ classroomId, groupName, targetSkill, tier, plan, createdAt }) -> Promise<number>`
-- `getInterventionPlanByGroup(classroomId, groupName) -> Promise<object|undefined>`
-- `updateInterventionPlan(planId, updates) -> Promise<number>`
+## 5. PWA and AWS hosting
 
-App settings (string-keyed key/value)
-- `getSetting(key, defaultValue = null) -> Promise<any>`
-- `setSetting(key, value) -> Promise<string>`
+The PDF.js worker is bundled locally so PDF extraction works without a third-party
+CDN. The PWA precaches static Vite assets including `.mjs`; API responses and
+IndexedDB user content are not runtime-cached. Build/deploy configuration lives
+in root `amplify.yml`, and `amplify-rewrites.json` contains the SPA route rule.
 
-### 1.3 Migration policy
+AWS deployment details and commands are in `cloud-api/README.md`. The frontend
+can be hosted before the API with `VITE_API_BASE_URL` unset. After SAM deploy,
+set the Amplify variable to `ApiBaseUrl` and set SAM `AllowedOrigin` to the exact
+Amplify origin.
 
-Schema changes are **additive and versioned**. Add a new `db.version(n).stores({...})`
-block; never remove or rename an existing store or index without a coordinated migration
-agreed across all consuming specs. Existing records and indexes must be preserved.
+## 6. Compatibility policy
 
----
-
-## 2. TierResolver — `src/utils/tierDetection.js`
-
-Resolves the effective AI tier **per feature invocation** (not once at app boot). A cached
-tier from a previous invocation is never reused for the decision, though cloud health is
-cached briefly to reduce network chatter.
-
-### 2.1 Stable tier string literals
-
-```
-TIER.CLOUD         === 'cloud'
-TIER.EDGE          === 'edge'
-TIER.DETERMINISTIC === 'deterministic'
-```
-
-User-facing labels (text, never color alone):
-
-```
-'cloud'         -> 'Cloud AI'
-'edge'          -> 'On-device AI'
-'deterministic' -> 'Offline mode'
-```
-
-### 2.2 API
-
-- `resolveTier({ feature, preference = null }) -> Promise<{ tier, label, reason }>`
-  - `feature`: feature key string, e.g. `'summarize' | 'quiz' | 'chat' | 'intervention'`.
-  - `preference`: optional manual override, one of the tier literals or `null`.
-  - Returns the **effective** tier actually used.
-- `checkCloudHealth() -> Promise<boolean>` (cached ~30s)
-- `invalidateHealthCache() -> void`
-- `registerEdgeProvider(feature, { ready }) -> void` (MVP: none registered)
-- `detectTier() -> Promise<string>` (convenience, no feature context)
-- Constants: `TIER`, `TIER_LABEL`
-
-### 2.3 Resolution order (per invocation)
-
-1. If `preference === 'deterministic'`, return deterministic immediately.
-2. Otherwise, unless `preference === 'edge'`, run `checkCloudHealth()`. If it returns
-   `true`, select **cloud** (Tier 2) and stop.
-3. If a registered **edge** provider for this feature is `ready`, select **edge** (Tier 1)
-   and stop. (No edge provider is registered in the MVP.)
-4. Fall through to **deterministic** (Tier 3) — always available.
-
-**Manual preference for an unavailable provider silently falls through** to the best
-available tier and returns the effective tier. A preference is a hint, never an error. The
-UI must display the effective tier, not the preference.
-
-**Post-selection cloud failure** (Lambda call fails after cloud was selected) is handled by
-the feature's own orchestrator, which catches the error and runs its deterministic (Tier 3)
-path. The resolver is not involved in that recovery.
-
----
-
-## 3. ApiTransport — `src/utils/apiTransport.js`
-
-The base URL is read from the build-time env var `VITE_API_BASE_URL` (defaults to same
-origin). It is **configuration, not a secret**. **No credentials** are embedded in or sent
-by the client.
-
-### 3.1 API
-
-- `apiHealthCheck(timeoutMs = 5000) -> Promise<boolean>` — GET `/api/health`; `true` on HTTP 200.
-- `apiPost(path, body, timeoutMs = 15000) -> Promise<object>` — POST JSON; parses JSON
-  response. Throws `ApiError` (with `.status`) on non-2xx; throws `ApiError('Request timed out', 408)` on timeout.
-
-### 3.2 What must never leave the client
-
-Never send to the API: uploaded PDF file bytes, PDF filenames, individual student names,
-classroom names, or any record that could identify a student. Send **extracted text
-chunks only**.
-
----
-
-## 4. Frozen API endpoints
-
-Base URL from `VITE_API_BASE_URL`. Response bodies are owned by the Cloud spec; request
-shapes below are frozen.
-
-| Method | Path | Request body | Response |
-|--------|------|--------------|----------|
-| GET | `/api/health` | — | `{ status: string }` |
-| POST | `/api/summarize` | `{ chunks: [{ text: string, page?: number }], language?: string }` | Summary schema (Cloud spec) |
-| POST | `/api/quiz` | `{ chunks: [{ chunkId: string, text: string }], weakTopics: string[], count: number }` | Quiz schema (Cloud spec) |
-| POST | `/api/chat` | `{ question: string, chunks: [{ chunkId: string, text: string, page?: number }] }` | Chat schema (Cloud spec) |
-| POST | `/api/intervention` | `{ gradeLevel: string, skill: string, groupSize: number, availableMaterials: string[], language: 'bilingual' }` | Plan schema (Cloud spec) |
-
-`/api/generate-items` is **deferred** and must not be implemented in the MVP.
-
----
-
-## 5. PWA / offline shell — `vite.config.js` (vite-plugin-pwa)
-
-- **Cache-first** for static Vite build output: JS/CSS chunks, HTML entry, web manifest,
-  icons, fonts (`globPatterns: **/*.{js,css,html,ico,png,svg,woff2}`).
-- **No runtime caching of `/api/*`** and no caching of IndexedDB content
-  (`runtimeCaching: []`). API responses and user-generated data live exclusively in
-  IndexedDB and are never placed in the service-worker static cache.
-- The shell and mode chooser render from cache on re-open with no network round-trip.
-  Network state is checked lazily at feature-invocation time, not at shell boot.
-
----
-
-## 6. Shared shell accessibility baseline
-
-Features inherit the shell's layout primitives, so these baselines are already met:
-
-- Minimum **48 × 48 CSS px** touch targets for primary interactive elements
-  (enforced in `src/index.css`).
-- **WCAG AA** contrast (4.5:1 body text, 3:1 large text / UI components).
-- Responsive, single-column at narrow widths; **no horizontal scroll at 320px**.
-- Mode and tier are conveyed in **text labels**, not color alone (see `TierBadge.jsx`,
-  which pairs an icon + text label; color is supplementary only).
-
----
-
-## 7. Breaking-change policy
-
-The contract version is **1.0.0**. Treat section 1–4 identifiers (store names, indexes,
-exported function names, tier literals, endpoint paths and request shapes) as a public API.
-
-- **Additive, non-breaking** changes (new store, new index, new helper, new endpoint): bump
-  the **minor** version and note it here.
-- **Breaking** changes (rename/remove a store, index, export, tier literal, or alter a
-  frozen request shape): bump the **major** version, update this file, and update every
-  consuming spec (Student Study Mode, Teacher/Assessment, Chat, Cloud) **before**
-  implementation proceeds.
+Additive stores, fields, helpers, or routes increment the minor contract version.
+Removing or renaming a store/index/export/route or changing a request shape
+requires a major version and an updated migration plan before implementation.

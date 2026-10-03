@@ -4,12 +4,13 @@
 import { resolveTier, TIER } from '../../utils/tierDetection.js';
 import { quizTier3 } from './quizTier3.js';
 import { saveQuiz, getDocument, getKnowledgeState } from '../../db/database.js';
+import { getInitialMastery } from '../bkt.js';
 
 /**
  * Generate a quiz for a document.
  *
  * @param {number} documentId
- * @param {{ preference?: string }} opts
+ * @param {{ preference?: string, weakTopics?: string[], technique?: string|null }} opts
  * @returns {Promise<{ tier: string, questions: object[], quizId: number }>}
  */
 export async function generateQuiz(documentId, opts = {}) {
@@ -24,10 +25,10 @@ export async function generateQuiz(documentId, opts = {}) {
   if (tier === TIER.CLOUD) {
     try {
       const { quizTier2 } = await import('./quizTier2.js');
-      result = await quizTier2(doc.chunks ?? [doc.rawText], knowledgeState);
+      result = await quizTier2(doc.chunks ?? [doc.rawText], knowledgeState, opts.weakTopics ?? []);
     } catch (error) {
       console.error('[Quiz] Cloud tier failed, falling back to deterministic:', error);
-      result = await quizTier3(doc.rawText, knowledgeState);
+      result = await quizTier3(doc.rawText, knowledgeState, opts.weakTopics ?? []);
     }
   } else if (tier === TIER.EDGE) {
     try {
@@ -38,10 +39,19 @@ export async function generateQuiz(documentId, opts = {}) {
       result = await quizTier3(doc.rawText, knowledgeState);
     }
   } else {
-    result = await quizTier3(doc.rawText, knowledgeState);
+    result = await quizTier3(doc.rawText, knowledgeState, opts.weakTopics ?? []);
   }
 
   // Save quiz record
+  const questionTopics = [...new Set((result.questions ?? []).map(q => q.topic || 'general'))];
+  const masteryBefore = questionTopics.length
+    ? questionTopics.reduce((sum, topic) => {
+      const entry = knowledgeState[topic];
+      const mastery = typeof entry === 'object' && entry !== null ? entry.mastery : entry;
+      return sum + (typeof mastery === 'number' ? mastery : getInitialMastery());
+    }, 0) / questionTopics.length
+    : getInitialMastery();
+
   const quizId = await saveQuiz({
     documentId,
     tier: result.tier,
@@ -49,6 +59,9 @@ export async function generateQuiz(documentId, opts = {}) {
     score: null,
     completedAt: null,
     createdAt: new Date(),
+    masteryBefore,
+    technique: opts.technique ?? null,
+    source: 'quiz',
   });
 
   return { ...result, quizId };

@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { saveDocument, getAllDocuments, deleteDocument } from '../../db/database.js';
 import { processDocument } from '../../utils/documentProcessor.js';
 import LoadingSpinner from '../../components/shared/LoadingSpinner.jsx';
 import ErrorMessage from '../../components/shared/ErrorMessage.jsx';
+
+const MAX_PDF_BYTES = 50 * 1024 * 1024;
 
 export default function StudentHome() {
   const navigate = useNavigate();
@@ -34,6 +36,10 @@ export default function StudentHome() {
   async function handleFile(file) {
     if (!file || file.type !== 'application/pdf') {
       setError('Please upload a PDF file.');
+      return;
+    }
+    if (file.size > MAX_PDF_BYTES) {
+      setError('This PDF is larger than 50 MB. Please choose a smaller file.');
       return;
     }
     setError(null);
@@ -147,26 +153,31 @@ export default function StudentHome() {
           <div className="space-y-3">
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Your Notes</h2>
             {documents.map(doc => (
-              <button
+              <article
                 key={doc.id}
-                onClick={() => navigate(`/student/document/${doc.id}`)}
-                className="w-full bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow border border-gray-100 text-left flex items-center gap-4 group"
+                className="w-full bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow border border-gray-100 flex items-center gap-4 group"
               >
-                <div className="text-2xl">📄</div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-gray-800 truncate group-hover:text-indigo-700">{doc.title}</div>
-                  <div className="text-gray-400 text-sm mt-0.5">
-                    {doc.chunks?.length ?? 0} chunks · {formatDate(doc.createdAt)}
-                  </div>
-                </div>
+                <Link
+                  to={`/student/document/${doc.id}`}
+                  className="flex flex-1 min-w-0 items-center gap-4 text-left rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                >
+                  <span className="text-2xl" aria-hidden="true">📄</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block font-semibold text-gray-800 truncate group-hover:text-indigo-700">{doc.title}</span>
+                    <span className="block text-gray-400 text-sm mt-0.5">
+                      {doc.chunks?.length ?? 0} chunks · {formatDate(doc.createdAt)}
+                    </span>
+                  </span>
+                </Link>
                 <button
+                  type="button"
                   onClick={e => onDelete(e, doc.id)}
-                  className="text-gray-300 hover:text-red-400 transition-colors text-lg min-h-[48px] min-w-[48px] flex items-center justify-center"
+                  className="text-gray-300 hover:text-red-400 transition-colors text-lg min-h-[48px] min-w-[48px] flex items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                   aria-label={`Delete ${doc.title}`}
                 >
                   🗑
                 </button>
-              </button>
+              </article>
             ))}
           </div>
         )}

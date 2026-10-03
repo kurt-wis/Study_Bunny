@@ -4,14 +4,16 @@
  * Chunks near 400 tokens with 50-token overlap, respecting sentence boundaries.
  */
 
-// PDF.js worker must be configured before use
+// PDF.js worker must be configured before use. Importing it as a Vite asset
+// keeps extraction available offline and avoids a third-party CDN dependency.
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
 let pdfjsLib = null;
 
 async function getPdfjsLib() {
   if (pdfjsLib) return pdfjsLib;
   const pdfjs = await import('pdfjs-dist');
-  // Set worker URL — use CDN for worker to avoid bundling the large worker file
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+  pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
   pdfjsLib = pdfjs;
   return pdfjs;
 }

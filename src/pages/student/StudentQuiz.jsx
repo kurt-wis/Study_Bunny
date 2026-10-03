@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom';
 import { generateQuiz } from '../../services/quiz/index.js';
-import { updateKnowledgeState, getKnowledgeState, updateQuizScore } from '../../db/database.js';
-import { updateMastery, getInitialMastery } from '../../services/bkt.js';
+import { startSession } from '../../services/spacedRepetition/index.js';
+import { getKnowledgeState, getQuizzesByDocument, getFeynmanAttempts, updateQuizScore } from '../../db/database.js';
+import { recordAnswer } from '../../services/spacedRepetition/index.js';
 import { diagnose, shouldDiagnose } from '../../services/diagnosis/index.js';
 import PomodoroTimer from '../../components/PomodoroTimer.jsx';
 import TierBadge from '../../components/shared/TierBadge.jsx';
@@ -36,7 +37,9 @@ export default function StudentQuiz() {
   const [showPomodoro, setShowPomodoro] = useState(false);
   const [diagnosis, setDiagnosis] = useState(null); // post-quiz technique diagnosis (Req 6.1)
   const [weakTopics, setWeakTopics] = useState([]); // topics below the weak threshold (Req 3.1)
+  const [savingAnswer, setSavingAnswer] = useState(false);
   const resultHeadingRef = useRef(null);
+  const recordedIndexesRef = useRef(new Set());
 
   useEffect(() => {
     loadQuiz();
@@ -58,7 +61,9 @@ export default function StudentQuiz() {
     setLoading(true);
     setError(null);
     try {
-      const result = await generateQuiz(docId);
+      const result = technique === 'spaced_repetition'
+        ? await startSession(docId, { technique })
+        : await generateQuiz(docId, { technique });
       setQuiz(result);
     } catch (err) {
       setError(err.message || 'Failed to generate quiz.');
@@ -77,6 +82,7 @@ export default function StudentQuiz() {
     setScore(0);
     setDiagnosis(null);
     setWeakTopics([]);
+    recordedIndexesRef.current = new Set();
     await loadQuiz();
   }
 
@@ -97,6 +103,10 @@ export default function StudentQuiz() {
     return answer === question.correct_answer;
   }
 
+  function isChoiceQuestion(question) {
+    return question?.type === 'true_false' || question?.type === 'multiple_choice';
+  }
+
   async function handleSubmitAnswer() {
     if (currentQ.type === 'fill_in_blank') {
       const answer = inputValue.trim();
@@ -104,17 +114,32 @@ export default function StudentQuiz() {
       setAnswers(prev => ({ ...prev, [currentIndex]: answer }));
       setInputValue('');
     }
+    if (isChoiceQuestion(currentQ) && !answers[currentIndex]) return;
     setSubmitted(true);
   }
 
   async function handleNext() {
-    if (currentIndex < totalQ - 1) {
-      setCurrentIndex(prev => prev + 1);
-      setSubmitted(false);
-      setInputValue('');
-    } else {
-      // Quiz complete — compute score and update BKT
-      await finishQuiz();
+    if (savingAnswer || !currentQ) return;
+    setSavingAnswer(true);
+    setError(null);
+    try {
+      if (!recordedIndexesRef.current.has(currentIndex)) {
+        await recordAnswer(docId, currentQ.topic || 'general', {
+          isCorrect: isCorrect(currentQ, answers[currentIndex]),
+        });
+        recordedIndexesRef.current.add(currentIndex);
+      }
+      if (currentIndex < totalQ - 1) {
+        setCurrentIndex(prev => prev + 1);
+        setSubmitted(false);
+        setInputValue('');
+      } else {
+        await finishQuiz();
+      }
+    } catch {
+      setError('Could not save this answer. Check your device storage and try again.');
+    } finally {
+      setSavingAnswer(false);
     }
   }
 
@@ -131,25 +156,22 @@ export default function StudentQuiz() {
       const answer = answers[i];
       const correct = isCorrect(q, answer);
       if (correct) finalScore++;
-
-      // Update BKT mastery for this topic
       const topic = q.topic || 'general';
-      const prior = topic in updatedMastery
-        ? updatedMastery[topic]
-        : (typeof ks[topic] === 'object'
-            ? (ks[topic].mastery ?? getInitialMastery())
-            : (ks[topic] ?? getInitialMastery()));
-      const newMastery = updateMastery(
-        Math.max(0.01, Math.min(0.99, prior)),
-        correct
-      );
-      updatedMastery[topic] = newMastery;
-      await updateKnowledgeState(docId, topic, newMastery);
+      const state = ks[topic];
+      const mastery = typeof state === 'object' && state !== null ? state.mastery : state;
+      updatedMastery[topic] = typeof mastery === 'number' ? mastery : 0;
     }
 
     setScore(finalScore);
+    const topicNames = Object.keys(updatedMastery);
+    const masteryAfter = topicNames.length
+      ? topicNames.reduce((sum, topic) => sum + updatedMastery[topic], 0) / topicNames.length
+      : quiz.masteryBefore ?? 0;
     if (quiz.quizId) {
-      await updateQuizScore(quiz.quizId, finalScore);
+      await updateQuizScore(quiz.quizId, finalScore, {
+        masteryBefore: quiz.masteryBefore,
+        masteryAfter,
+      });
     }
 
     // Weak topics for the Feynman "explain this topic" prompt (Req 3.1).
@@ -164,13 +186,30 @@ export default function StudentQuiz() {
     // throws — it falls back to the deterministic engine on any cloud failure —
     // so a failure here must never block the results screen.
     const fractionalScore = totalQ > 0 ? finalScore / totalQ : 0;
-    if (shouldDiagnose({ quizScore: fractionalScore })) {
+    const [previousQuizzes, previousFeynmanAttempts] = await Promise.all([
+      getQuizzesByDocument(docId),
+      getFeynmanAttempts(docId),
+    ]);
+    const priorMasteryAttempts = [
+      ...previousQuizzes
+        .filter(record => record.id !== quiz.quizId && Number.isFinite(record.masteryAfter))
+        .map(record => ({ masteryAfter: record.masteryAfter, createdAt: record.createdAt })),
+      ...previousFeynmanAttempts
+        .filter(record => Number.isFinite(record.masteryAfter))
+        .map(record => ({ masteryAfter: record.masteryAfter, createdAt: record.createdAt })),
+    ].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    const masteryHistory = priorMasteryAttempts
+      .slice(-2)
+      .map(record => record.masteryAfter)
+      .concat(masteryAfter);
+    if (shouldDiagnose({ quizScore: fractionalScore, masteryHistory })) {
       try {
         const result = await diagnose({
           documentId: docId,
           currentHabit: technique || null,
           quizScore: fractionalScore,
           weakTopics: weak,
+          masteryHistory,
         });
         setDiagnosis(result);
       } catch {
@@ -182,6 +221,46 @@ export default function StudentQuiz() {
   }
 
   if (loading) return <div className="p-6"><LoadingSpinner message="Generating quiz..." /></div>;
+
+  if (!quiz?.questions?.length) {
+    const nothingDue = technique === 'spaced_repetition' && !error;
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="bg-white border-b border-gray-200">
+          <div className="max-w-2xl mx-auto px-4 h-14 flex items-center gap-3">
+            <button onClick={() => navigate(`/student/document/${docId}`)} aria-label="Back to document" className="text-gray-500 hover:text-gray-700 text-xl min-h-[48px] min-w-[48px] flex items-center justify-center">‹</button>
+            <h1 className="font-bold text-lg">{nothingDue ? 'All caught up' : 'Quiz unavailable'}</h1>
+          </div>
+        </header>
+        <main className="max-w-2xl mx-auto px-4 py-8">
+          <div className="bg-white rounded-2xl p-6 shadow-sm text-center">
+            <div className="text-5xl mb-3" aria-hidden="true">{nothingDue ? '🌱' : '📚'}</div>
+            <p className="text-gray-700">
+              {nothingDue
+                ? 'There are no topics due for spaced review right now. You can take a regular quiz or come back when a topic is due.'
+                : 'No questions were generated. Please try again.'}
+            </p>
+            {error && <div className="mt-4"><ErrorMessage message={error} /></div>}
+            <div className="mt-5 space-y-3">
+              {technique === 'spaced_repetition' && (
+                <button onClick={() => navigate(`/student/document/${docId}/quiz`)} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl min-h-[48px]">
+                  Take a regular quiz now
+                </button>
+              )}
+              {!nothingDue && (
+                <button onClick={loadQuiz} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl min-h-[48px]">
+                  Try again
+                </button>
+              )}
+              <button onClick={() => navigate(`/student/document/${docId}`)} className="w-full border border-gray-200 text-gray-600 font-medium py-3 rounded-xl min-h-[48px]">
+                Back to document
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   if (showResult) {
     return (
@@ -359,7 +438,7 @@ export default function StudentQuiz() {
           {/* Difficulty / topic badge */}
           <div className="flex gap-2 mb-4">
             <span className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded-full">
-              {currentQ.type === 'fill_in_blank' ? '✏️ Fill in blank' : '✓✗ True/False'}
+              {currentQ.type === 'fill_in_blank' ? '✏️ Fill in blank' : currentQ.type === 'multiple_choice' ? '🔘 Multiple choice' : '✓✗ True/False'}
             </span>
             {currentQ.difficulty === 'review' && (
               <span className="text-xs bg-amber-100 text-amber-600 px-2 py-1 rounded-full">🔁 Review topic</span>
@@ -372,9 +451,9 @@ export default function StudentQuiz() {
             <p className="text-gray-800 text-lg leading-relaxed whitespace-pre-line">{currentQ.question}</p>
           </legend>
 
-          {/* True/False options */}
-          {currentQ.type === 'true_false' && (
-            <div className="space-y-3">
+          {/* Choice options (Bedrock multiple choice and deterministic T/F). */}
+          {isChoiceQuestion(currentQ) && (
+            <div className="space-y-3" role="group" aria-label="Answer options">
               {(currentQ.options ?? ['True', 'False']).map(option => {
                 const selected = answers[currentIndex] === option;
                 const correct = submitted && option === currentQ.correct_answer;
@@ -439,7 +518,7 @@ export default function StudentQuiz() {
           )}
 
           {/* T/F result */}
-          {currentQ.type === 'true_false' && submitted && answers[currentIndex] && (
+          {isChoiceQuestion(currentQ) && submitted && answers[currentIndex] && (
             <div role="status" aria-live="polite" className={`rounded-xl p-4 mt-3 ${isCorrect(currentQ, answers[currentIndex]) ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
               <div className="font-semibold text-sm">
                 {isCorrect(currentQ, answers[currentIndex]) ? '✅ Correct!' : '❌ Incorrect'}
@@ -454,14 +533,15 @@ export default function StudentQuiz() {
           {submitted && (
             <button
               onClick={handleNext}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl mt-4 min-h-[56px] text-lg transition-colors"
+              disabled={savingAnswer}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold py-4 rounded-xl mt-4 min-h-[56px] text-lg transition-colors"
             >
-              {currentIndex < totalQ - 1 ? 'Next Question →' : 'See Results →'}
+              {savingAnswer ? 'Saving…' : currentIndex < totalQ - 1 ? 'Next Question →' : 'See Results →'}
             </button>
           )}
 
-          {/* Submit T/F */}
-          {currentQ.type === 'true_false' && !submitted && answers[currentIndex] && (
+          {/* Confirm a selected choice. */}
+          {isChoiceQuestion(currentQ) && !submitted && answers[currentIndex] && (
             <button
               onClick={() => setSubmitted(true)}
               className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl mt-4 min-h-[48px]"

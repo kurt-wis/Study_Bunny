@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import usePomodoro, { PHASES } from '../hooks/usePomodoro.js';
+import React, { useEffect, useRef, useState } from 'react';
+import usePomodoro, { DEFAULT_CONFIG, MS_PER_MINUTE, PHASES } from '../hooks/usePomodoro.js';
 
 /**
  * PomodoroTimer — a pure-client timer UI overlay (design.md §5.2, Req 2.1–2.6, 8.4).
@@ -80,19 +80,38 @@ const BTN_BASE =
   'focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500 ' +
   'disabled:opacity-40 disabled:cursor-not-allowed';
 
-export default function PomodoroTimer({ config, persist = true, className = '' }) {
+export default function PomodoroTimer({ config: initialConfig, persist = true, className = '' }) {
   const {
     phase,
     remainingMs,
     cycleCount,
     running,
+    config,
     isFocusPermissionGranted,
     start,
     pause,
     reset,
     skip,
+    configure,
     setFocusPermission,
-  } = usePomodoro({ config, persist });
+  } = usePomodoro({ config: initialConfig, persist });
+  const [showSettings, setShowSettings] = useState(false);
+  const [focusMinutes, setFocusMinutes] = useState(Math.round((config?.focusMs ?? DEFAULT_CONFIG.focusMs) / MS_PER_MINUTE));
+  const [breakMinutes, setBreakMinutes] = useState(Math.round((config?.shortBreakMs ?? DEFAULT_CONFIG.shortBreakMs) / MS_PER_MINUTE));
+
+  useEffect(() => {
+    setFocusMinutes(Math.round(config.focusMs / MS_PER_MINUTE));
+    setBreakMinutes(Math.round(config.shortBreakMs / MS_PER_MINUTE));
+  }, [config.focusMs, config.shortBreakMs]);
+
+  function saveTimerSettings(event) {
+    event.preventDefault();
+    const focus = Number(focusMinutes);
+    const shortBreak = Number(breakMinutes);
+    if (!Number.isInteger(focus) || focus < 1 || focus > 120 || !Number.isInteger(shortBreak) || shortBreak < 1 || shortBreak > 60) return;
+    configure({ focusMs: focus * MS_PER_MINUTE, shortBreakMs: shortBreak * MS_PER_MINUTE });
+    setShowSettings(false);
+  }
 
   // ── Live-region phase announcements (Req 2.3) ──────────────────────────────
   // Announce only on an actual phase change so screen readers aren't spammed on
@@ -243,6 +262,31 @@ export default function PomodoroTimer({ config, persist = true, className = '' }
           Skip
         </button>
       </div>
+
+      <button
+        type="button"
+        onClick={() => setShowSettings(value => !value)}
+        aria-expanded={showSettings}
+        aria-controls="pomodoro-settings"
+        className={`${BTN_BASE} w-full bg-gray-50 text-gray-600 hover:bg-gray-100`}
+      >
+        ⚙️ Timer settings
+      </button>
+      {showSettings && (
+        <form id="pomodoro-settings" onSubmit={saveTimerSettings} className="w-full grid grid-cols-2 gap-3" aria-label="Pomodoro timer settings">
+          <label className="text-sm text-gray-600" htmlFor="pomodoro-focus-minutes">
+            Focus minutes
+            <input id="pomodoro-focus-minutes" type="number" min="1" max="120" step="1" required value={focusMinutes} onChange={event => setFocusMinutes(event.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 min-h-[48px] text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" />
+          </label>
+          <label className="text-sm text-gray-600" htmlFor="pomodoro-break-minutes">
+            Break minutes
+            <input id="pomodoro-break-minutes" type="number" min="1" max="60" step="1" required value={breakMinutes} onChange={event => setBreakMinutes(event.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 min-h-[48px] text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" />
+          </label>
+          <button type="submit" className={`${BTN_BASE} col-span-2 bg-indigo-600 text-white hover:bg-indigo-700`}>
+            Save timer settings
+          </button>
+        </form>
+      )}
 
       {/* Optional, revocable focus mode (keeps a screen wake lock while running) */}
       <button

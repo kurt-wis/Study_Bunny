@@ -89,6 +89,8 @@ export function buildAttemptRecord({
   explanation = '',
   result,
   createdAt,
+  masteryBefore = null,
+  masteryAfter = null,
 } = {}) {
   const r = result && typeof result === 'object' ? result : {};
   return {
@@ -102,6 +104,10 @@ export function buildAttemptRecord({
     aiScore: typeof r.aiScore === 'number' ? r.aiScore : null,
     matchedKeywords: Array.isArray(r.matchedKeywords) ? r.matchedKeywords : [],
     missedKeywords: Array.isArray(r.missedKeywords) ? r.missedKeywords : [],
+    source: 'review',
+    technique: 'feynman',
+    ...(Number.isFinite(masteryBefore) ? { masteryBefore } : {}),
+    ...(Number.isFinite(masteryAfter) ? { masteryAfter } : {}),
     createdAt: createdAt ?? new Date(),
   };
 }
@@ -202,15 +208,11 @@ export async function evaluateFeynman({
     };
   }
 
-  // ── Persist the attempt (Req 3.2) ──
-  const attemptId = await saveFeynmanAttempt(
-    buildAttemptRecord({ documentId, topic, prompt, explanation, result }),
-  );
-
   // ── BKT mastery update from the outcome (Req 3.2) ──
   // Only when the attempt is tied to a concrete topic — a topic-less reflection
   // has no mastery row to move.
   let mastery = null;
+  let masteryBefore = null;
   if (topic != null && topic !== '') {
     const { updateMastery, getInitialMastery } = await import('../bkt.js');
     const state = await getKnowledgeState(documentId);
@@ -220,6 +222,7 @@ export async function evaluateFeynman({
       typeof current.mastery === 'number' ? current.mastery : initial,
       initial,
     );
+    masteryBefore = currentMastery;
     const isCorrect = outcomeToCorrectness({
       selfRating: result.selfRating,
       aiScore: result.aiScore,
@@ -228,6 +231,12 @@ export async function evaluateFeynman({
     mastery = updateMastery(currentMastery, isCorrect);
     await updateKnowledgeState(documentId, topic, mastery);
   }
+
+  // Persist the completed attempt together with its BKT change so the dashboard
+  // can compare genuine mastery gain instead of treating quiz accuracy as mastery.
+  const attemptId = await saveFeynmanAttempt(
+    buildAttemptRecord({ documentId, topic, prompt, explanation, result, masteryBefore, masteryAfter: mastery }),
+  );
 
   return { ...result, attemptId, mastery };
 }

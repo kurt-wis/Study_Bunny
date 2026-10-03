@@ -27,6 +27,7 @@ Every AI-powered feature resolves its tier **per invocation** and shows the user
 
 - **Drag-and-drop or click-to-browse** PDF upload (`StudentHome`).
 - Text extraction with **PDF.js**, page by page, preserving page numbers.
+- The PDF.js worker is bundled with the app so extraction works without a third-party CDN.
 - **Sentence-aware chunking**: ~400-token windows with ~50-token overlap, splitting on sentence boundaries.
 - Each chunk gets a **stable `chunkId`** (`${documentId}-${index}`) and a token estimate.
 - Document + chunks persisted to **IndexedDB** (via the shared repository).
@@ -50,6 +51,7 @@ Produces a structured study summary with a shared shape across tiers:
 - Generates **5 questions** per quiz.
 - **Tier 3 (offline):** 3 fill-in-the-blank + 2 true/false, derived from RAKE keywords; auto-padded to 5 if source text is thin.
 - **Tier 2 (cloud):** multiple-choice with distractor explanations.
+- Bedrock multiple-choice questions render as selectable options alongside the offline question types.
 - **Weak-topic bias** — questions favor topics the student has the lowest mastery on.
 - Tap/type answer flow with immediate per-question feedback and explanations.
 - Fill-in-the-blank accepts case variations; true/false uses labeled options.
@@ -61,6 +63,7 @@ Produces a structured study summary with a shared shape across tiers:
 - **Bayesian Knowledge Tracing** engine, pure JS, 100% offline.
 - Parameters: `pInit = 0.3`, `pLearn = 0.2`, `pSlip = 0.1`, `pGuess = 0.25`.
 - After every answer, per-topic mastery is updated (Bayes posterior + learning transition) and **clamped to [0.01, 0.99]**.
+- Quiz and guided review answers also update the local SM-2 schedule. New Dashboard records persist BKT before/after snapshots instead of treating quiz accuracy as mastery.
 - A correct answer never decreases mastery (monotonic-on-correct invariant).
 - **Weak-topic detection** (mastery < 0.6) feeds back into future quiz generation.
 - Mastery is visualized as **per-topic progress bars** (color + percentage + label: Needs work / Learning / Mastered).
@@ -96,7 +99,7 @@ The thin layer every feature builds on (owned by the Platform Foundation spec).
 
 ### Cloud backend (optional Tier 2 enhancement)
 - Node.js Lambda handlers behind API Gateway invoking Amazon Bedrock (Claude 3 Haiku).
-- Endpoints used by Student Mode: `/api/health`, `/api/summarize`, `/api/quiz`, `/api/chat`.
+- Endpoints used by Student Mode: `/api/health`, `/api/summarize`, `/api/quiz`, `/api/chat`, `/api/feynman`, `/api/analyze-technique`.
 - Request validation + content-free logging; no PDF bytes, filenames, or identities accepted.
 - The app is fully functional **without** this backend — it just unlocks the richer cloud tier.
 
@@ -105,6 +108,7 @@ The thin layer every feature builds on (owned by the Platform Foundation spec).
 ## 8. Progressive Web App (Offline-First)
 
 - Installable PWA (web app manifest + service worker via `vite-plugin-pwa`).
+- AWS Amplify build settings and the SPA rewrite are provided in `amplify.yml` and `amplify-rewrites.json`.
 - **Cache-first** for static build assets (JS/CSS/HTML/icons); **network-or-cache** for navigation.
 - **Never caches** `/api/*` responses or IndexedDB content — user data lives only in IndexedDB.
 - Shell + first screen render on re-open with no network round-trip.

@@ -47,8 +47,8 @@ export default db;
 
 // ─── Documents ───────────────────────────────────────────────────────────────
 
-export async function saveDocument({ title, rawText, chunks, createdAt }) {
-  return db.documents.add({ title, rawText, chunks, createdAt: createdAt ?? new Date() });
+export async function saveDocument({ title, rawText, chunks, pages, createdAt }) {
+  return db.documents.add({ title, rawText, chunks, pages: pages ?? [], createdAt: createdAt ?? new Date() });
 }
 
 export async function getDocument(documentId) {
@@ -60,12 +60,14 @@ export async function getAllDocuments() {
 }
 
 export async function deleteDocument(documentId) {
-  await db.transaction('rw', [db.documents, db.summaries, db.quizzes, db.knowledgeState, db.chatHistory], async () => {
+  await db.transaction('rw', [db.documents, db.summaries, db.quizzes, db.knowledgeState, db.chatHistory, db.studyTechniques, db.feynmanAttempts], async () => {
     await db.documents.delete(documentId);
     await db.summaries.where('documentId').equals(documentId).delete();
     await db.quizzes.where('documentId').equals(documentId).delete();
     await db.knowledgeState.where('documentId').equals(documentId).delete();
     await db.chatHistory.where('documentId').equals(documentId).delete();
+    await db.studyTechniques.where('documentId').equals(documentId).delete();
+    await db.feynmanAttempts.where('documentId').equals(documentId).delete();
   });
 }
 
@@ -88,12 +90,16 @@ export async function getSummary(documentId, tier) {
 
 // ─── Quizzes ──────────────────────────────────────────────────────────────────
 
-export async function saveQuiz({ documentId, tier, questions, score, completedAt, createdAt }) {
+export async function saveQuiz({ documentId, tier, questions, score, completedAt, createdAt, masteryBefore, masteryAfter, technique, source }) {
   return db.quizzes.add({
     documentId, tier, questions,
     score: score ?? null,
     completedAt: completedAt ?? null,
     createdAt: createdAt ?? new Date(),
+    ...(Number.isFinite(masteryBefore) ? { masteryBefore } : {}),
+    ...(Number.isFinite(masteryAfter) ? { masteryAfter } : {}),
+    ...(technique !== undefined ? { technique } : {}),
+    ...(source !== undefined ? { source } : {}),
   });
 }
 
@@ -101,8 +107,12 @@ export async function getQuizzesByDocument(documentId) {
   return db.quizzes.where('documentId').equals(documentId).reverse().sortBy('createdAt');
 }
 
-export async function updateQuizScore(quizId, score) {
-  return db.quizzes.update(quizId, { score, completedAt: new Date() });
+export async function updateQuizScore(quizId, score, metrics = {}) {
+  const allowedMetrics = {};
+  for (const key of ['masteryBefore', 'masteryAfter']) {
+    if (Number.isFinite(metrics[key])) allowedMetrics[key] = Math.max(0, Math.min(1, metrics[key]));
+  }
+  return db.quizzes.update(quizId, { score, completedAt: new Date(), ...allowedMetrics });
 }
 
 /**
@@ -138,6 +148,7 @@ export async function getKnowledgeState(documentId) {
       updatedAt: r.updatedAt,
       interval: r.interval,
       easeFactor: r.easeFactor,
+      repetitions: r.repetitions,
       nextReviewDate: r.nextReviewDate,
     };
   }
@@ -178,6 +189,7 @@ export async function saveFeynmanAttempt(attempt) {
   const {
     documentId, topic, prompt, explanation, tier,
     selfRating, aiScore, matchedKeywords, missedKeywords, createdAt,
+    source, technique, masteryBefore, masteryAfter,
   } = attempt;
   return db.feynmanAttempts.add({
     documentId, topic,
@@ -188,6 +200,10 @@ export async function saveFeynmanAttempt(attempt) {
     aiScore: aiScore ?? null,
     matchedKeywords: matchedKeywords ?? [],
     missedKeywords: missedKeywords ?? [],
+    source: source ?? 'review',
+    technique: technique ?? 'feynman',
+    ...(Number.isFinite(masteryBefore) ? { masteryBefore } : {}),
+    ...(Number.isFinite(masteryAfter) ? { masteryAfter } : {}),
     createdAt: createdAt ?? new Date(),
   });
 }
@@ -221,7 +237,7 @@ export async function getDueTopics(documentId, now = new Date()) {
   return due.map(r => ({ topic: r.topic, mastery: r.mastery, nextReviewDate: r.nextReviewDate }));
 }
 
-export async function updateSchedule(documentId, topic, { interval, easeFactor, nextReviewDate }) {
+export async function updateSchedule(documentId, topic, { interval, easeFactor, repetitions, nextReviewDate }) {
   const existing = await db.knowledgeState
     .where('[documentId+topic]')
     .equals([documentId, topic])
@@ -229,12 +245,18 @@ export async function updateSchedule(documentId, topic, { interval, easeFactor, 
     .catch(() => db.knowledgeState.where('documentId').equals(documentId).and(r => r.topic === topic).first());
 
   if (existing) {
-    return db.knowledgeState.update(existing.id, { interval, easeFactor, nextReviewDate });
+    return db.knowledgeState.update(existing.id, {
+      interval,
+      easeFactor,
+      ...(Number.isFinite(repetitions) ? { repetitions } : {}),
+      nextReviewDate,
+    });
   }
   // No mastery row yet: create a scheduling-only row; BKT fills mastery later.
   return db.knowledgeState.add({
     documentId, topic, mastery: 0, updatedAt: new Date(),
     interval, easeFactor, nextReviewDate,
+    ...(Number.isFinite(repetitions) ? { repetitions } : {}),
   });
 }
 

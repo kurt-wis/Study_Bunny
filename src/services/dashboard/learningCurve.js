@@ -3,7 +3,8 @@
  *
  * The Dashboard reads all `quizzes` for a document and turns them into:
  *   - a learning curve: one point per attempt, ordered by time, carrying the
- *     attempt's fractional mastery (score / question count), the technique that
+ *     attempt's persisted BKT mastery when available (legacy rows fall back to
+ *     quiz accuracy and are explicitly labelled), the technique that
  *     produced it, and its source (plain `quiz` vs guided `review`) (Req 7.1);
  *   - the inflection point: the first attempt whose technique differs from the
  *     first attempt's technique — i.e. where the student first switched methods
@@ -19,9 +20,8 @@
  *   { id, documentId, tier, questions: [...], score: number|null,
  *     completedAt, createdAt, source?: 'quiz'|'review', technique?: string|null }
  *
- * `score` is the count of correct answers; the fractional mastery for the
- * attempt is `score / questions.length`. Records without a completed score are
- * not plottable and are skipped.
+ * New records carry BKT mastery before/after. Older quiz rows have only score
+ * and are retained as clearly labelled historical accuracy points.
  */
 
 /** Techniques are color/label-coded on the curve (Req 7.2). `null` = plain quiz. */
@@ -87,10 +87,18 @@ export function buildCurvePoints(quizzes) {
       const total = questionCount(q);
       const score = typeof q?.score === 'number' ? q.score : null;
       const t = timeOf(q?.createdAt) ?? timeOf(q?.completedAt);
-      if (score == null || total <= 0) return null;
+      const hasBktMastery = Number.isFinite(q?.masteryAfter);
+      if (!hasBktMastery && (score == null || total <= 0)) return null;
+      const masteryBefore = Number.isFinite(q?.masteryBefore) ? q.masteryBefore : null;
+      const mastery = hasBktMastery
+        ? Math.max(0, Math.min(1, q.masteryAfter))
+        : Math.max(0, Math.min(1, score / total));
       return {
         _time: t ?? 0,
-        mastery: Math.max(0, Math.min(1, score / total)),
+        mastery,
+        masteryBefore,
+        gain: masteryBefore == null ? null : mastery - masteryBefore,
+        metric: hasBktMastery ? 'BKT mastery' : 'quiz accuracy (older record)',
         score,
         total,
         technique: seriesKeyFor(q?.technique),
@@ -107,13 +115,16 @@ export function buildCurvePoints(quizzes) {
       ? p.createdAt.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })
       : null;
     const srcLabel = p.source === 'review' ? 'review' : 'quiz';
+    const scoreLabel = p.score == null ? '' : ` (${p.score}/${p.total})`;
     const label =
-      `Attempt ${i + 1}: ${pct}% ` +
-      `(${p.score}/${p.total}) via ${seriesLabelFor(p.technique)} ${srcLabel}` +
+      `Attempt ${i + 1}: ${pct}% ${p.metric}${scoreLabel} via ${seriesLabelFor(p.technique)} ${srcLabel}` +
       (when ? `, ${when}` : '');
     return {
       attempt: i + 1,
       mastery: p.mastery,
+      masteryBefore: p.masteryBefore,
+      gain: p.gain,
+      metric: p.metric,
       score: p.score,
       total: p.total,
       technique: p.technique,
@@ -174,14 +185,12 @@ export function techniqueEffectiveness(points) {
   if (!Array.isArray(points) || points.length === 0) return [];
 
   const groups = new Map(); // technique → { gainSum, sessions }
-  let prevMastery = null;
   for (const p of points) {
-    const gain = prevMastery == null ? 0 : p.mastery - prevMastery;
+    if (!Number.isFinite(p.gain)) continue;
     const g = groups.get(p.technique) ?? { gainSum: 0, sessions: 0 };
-    g.gainSum += gain;
+    g.gainSum += p.gain;
     g.sessions += 1;
     groups.set(p.technique, g);
-    prevMastery = p.mastery;
   }
 
   return Array.from(groups.entries())
@@ -230,12 +239,14 @@ export function sourceAttribution(points) {
  */
 export function deriveDashboard(quizzes) {
   const points = buildCurvePoints(quizzes);
+  const effectiveness = techniqueEffectiveness(points);
   return {
     points,
     inflection: findInflection(points),
     techniques: techniquesInCurve(points),
-    effectiveness: techniqueEffectiveness(points),
+    effectiveness,
     attribution: sourceAttribution(points),
+    hasEffectiveness: effectiveness.length > 0,
     hasData: points.length > 0,
   };
 }

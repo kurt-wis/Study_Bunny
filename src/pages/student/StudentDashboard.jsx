@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getDocument, getKnowledgeState, getQuizzesByDocument } from '../../db/database.js';
+import { getDocument, getKnowledgeState, getQuizzesByDocument, getFeynmanAttempts } from '../../db/database.js';
 import { deriveDashboard, seriesLabelFor } from '../../services/dashboard/learningCurve.js';
 import LearningCurve from '../../components/LearningCurve.jsx';
 import LoadingSpinner from '../../components/shared/LoadingSpinner.jsx';
@@ -42,6 +42,7 @@ export default function StudentDashboard() {
   const [doc, setDoc] = useState(null);
   const [knowledgeState, setKnowledgeState] = useState({});
   const [quizzes, setQuizzes] = useState([]);
+  const [feynmanAttempts, setFeynmanAttempts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -51,10 +52,11 @@ export default function StudentDashboard() {
       setLoading(true);
       setError(null);
       try {
-        const [docData, ks, quizRecords] = await Promise.all([
+        const [docData, ks, quizRecords, feynmanRecords] = await Promise.all([
           getDocument(docId),
           getKnowledgeState(docId),
           getQuizzesByDocument(docId),
+          getFeynmanAttempts(docId),
         ]);
         if (cancelled) return;
         if (!docData) {
@@ -64,6 +66,7 @@ export default function StudentDashboard() {
         setDoc(docData);
         setKnowledgeState(ks);
         setQuizzes(quizRecords);
+        setFeynmanAttempts(feynmanRecords);
       } catch {
         if (!cancelled) setError('Failed to load your dashboard.');
       } finally {
@@ -76,7 +79,10 @@ export default function StudentDashboard() {
   }, [docId]);
 
   // All curve / effectiveness / attribution derivation is pure and local.
-  const dashboard = useMemo(() => deriveDashboard(quizzes), [quizzes]);
+  const dashboard = useMemo(
+    () => deriveDashboard([...quizzes, ...feynmanAttempts]),
+    [quizzes, feynmanAttempts],
+  );
 
   // Current per-topic mastery bars — weakest first, matching the Mastery tab.
   const masteryTopics = useMemo(
@@ -116,7 +122,7 @@ export default function StudentDashboard() {
     );
   }
 
-  const { points, inflection, effectiveness, attribution, hasData } = dashboard;
+  const { points, inflection, effectiveness, attribution, hasData, hasEffectiveness } = dashboard;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -129,7 +135,7 @@ export default function StudentDashboard() {
           <div>
             <h2 className="font-bold text-gray-800 text-lg">Learning curve</h2>
             <p className="text-sm text-gray-500">
-              Your mastery per attempt over time{inflection ? ', color-coded by technique.' : '.'}
+              Your BKT mastery per attempt where available; older quiz records use quiz accuracy.{inflection ? ' Points are color-coded by technique.' : ''}
             </p>
           </div>
 
@@ -203,7 +209,7 @@ export default function StudentDashboard() {
                 <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
                   Average mastery gain per session
                 </h3>
-                <div className="space-y-3">
+                {hasEffectiveness ? <div className="space-y-3">
                   {effectiveness.map(e => {
                     const gainPts = Math.round(e.avgGain * 100);
                     const sign = gainPts > 0 ? '+' : '';
@@ -235,7 +241,7 @@ export default function StudentDashboard() {
                       </div>
                     );
                   })}
-                </div>
+                </div> : <p className="text-sm text-gray-500">New sessions will add mastery-change data here. Older quiz records only kept quiz scores.</p>}
                 <p className="text-xs text-gray-500 mt-3">
                   Gain is how much your mastery moved on average each session with that technique.
                 </p>

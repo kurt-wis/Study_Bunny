@@ -13,6 +13,7 @@ import {
   getDocument,
   getKnowledgeState,
   tagQuizSource,
+  updateQuizScore,
 } from '../../db/database.js';
 import PomodoroTimer from '../../components/PomodoroTimer.jsx';
 import TierBadge from '../../components/shared/TierBadge.jsx';
@@ -401,6 +402,7 @@ function SpacedRepetitionSession({ documentId, technique, onExit, onDashboard })
   const [confidence, setConfidence] = useState(null); // current Q confidence rating
   const [results, setResults] = useState([]); // per-question { topic, isCorrect, nextReviewDate }
   const [finished, setFinished] = useState(false);
+  const [savingAnswer, setSavingAnswer] = useState(false);
   const resultHeadingRef = useRef(null);
 
   useEffect(() => {
@@ -455,6 +457,8 @@ function SpacedRepetitionSession({ documentId, technique, onExit, onDashboard })
   }
 
   async function commitAndNext() {
+    if (savingAnswer) return;
+    setSavingAnswer(true);
     const q = currentQ;
     const answer = q.type === 'fill_in_blank' ? inputValue.trim() : selected;
     const isCorrect = checkCorrect(q, answer);
@@ -468,16 +472,19 @@ function SpacedRepetitionSession({ documentId, technique, onExit, onDashboard })
       schedule = await recordAnswer(
         documentId,
         topic,
-        confidence != null ? { confidence } : { isCorrect },
+        { isCorrect, ...(confidence != null ? { confidence } : {}) },
       );
     } catch {
-      /* persistence is best-effort; still advance the session */
+      setError('Could not save this review answer. Check your device storage and try again.');
+      setSavingAnswer(false);
+      return;
     }
 
-    setResults(prev => [
-      ...prev,
+    const nextResults = [
+      ...results,
       { topic, isCorrect, confidence, nextReviewDate: schedule?.nextReviewDate ?? null },
-    ]);
+    ];
+    setResults(nextResults);
 
     // Reset per-question state and advance (or finish).
     setRevealed(false);
@@ -487,8 +494,25 @@ function SpacedRepetitionSession({ documentId, technique, onExit, onDashboard })
     if (index < total - 1) {
       setIndex(i => i + 1);
     } else {
+      try {
+        const correctCount = nextResults.filter(r => r.isCorrect).length;
+        const state = await getKnowledgeState(documentId);
+        const topics = [...new Set(nextResults.map(r => r.topic))];
+        const masteryAfter = topics.length
+          ? topics.reduce((sum, name) => sum + (state[name]?.mastery ?? 0), 0) / topics.length
+          : session.masteryBefore;
+        if (session.quizId != null) {
+          await updateQuizScore(session.quizId, correctCount, {
+            masteryBefore: session.masteryBefore,
+            masteryAfter,
+          });
+        }
+      } catch {
+        setError('Your answers are saved, but the session summary could not be updated.');
+      }
       setFinished(true);
     }
+    setSavingAnswer(false);
   }
 
   if (loading) return <LoadingSpinner message="Finding your due topics..." />;
@@ -721,10 +745,10 @@ function SpacedRepetitionSession({ documentId, technique, onExit, onDashboard })
       {revealed && (
         <button
           onClick={commitAndNext}
-          disabled={confidence == null}
+          disabled={savingAnswer || confidence == null}
           className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 text-white font-bold py-4 rounded-xl min-h-[56px] text-lg transition-colors"
         >
-          {index < total - 1 ? 'Next topic →' : 'See results →'}
+          {savingAnswer ? 'Saving…' : index < total - 1 ? 'Next topic →' : 'See results →'}
         </button>
       )}
     </div>

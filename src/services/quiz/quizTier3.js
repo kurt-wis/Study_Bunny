@@ -11,8 +11,17 @@ import { extractKeywords } from '../../ai/rakeExtractor.js';
  * @param {object} knowledgeState - { [topic]: { mastery: number } | number }
  * @returns {Promise<{ tier: string, questions: object[] }>}
  */
-export async function quizTier3(rawText, knowledgeState = {}) {
+export async function quizTier3(rawText, knowledgeState = {}, preferredTopics = []) {
   const keywords = extractKeywords(rawText, 8);
+  const prioritized = (Array.isArray(preferredTopics) ? preferredTopics : [])
+    .map(topic => String(topic).toLowerCase()).filter(Boolean);
+  if (prioritized.length) {
+    keywords.sort((a, b) => {
+      const score = kw => prioritized.reduce((n, topic) =>
+        n + (kw.phrase.toLowerCase().includes(topic) || topic.includes(kw.phrase.toLowerCase()) ? 1 : 0), 0);
+      return score(b) - score(a);
+    });
+  }
   const sentences = rawText.match(/[^.!?]+[.!?]+/g) || [];
   const questions = [];
 

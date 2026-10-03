@@ -11,12 +11,15 @@ import { buildDifficultyInstruction } from '../difficultyBuilder.js';
  * @param {object} knowledgeState
  * @returns {Promise<{ tier: string, questions: object[] }>}
  */
-export async function quizTier2(chunks, knowledgeState = {}) {
+export async function quizTier2(chunks, knowledgeState = {}, preferredTopics = []) {
   const { weakTopics } = buildDifficultyInstruction(knowledgeState);
 
   const payload = {
     chunks: chunks.map((text, i) => ({ chunkId: `chunk-${i}`, text })),
-    weakTopics: weakTopics.map(w => w.topic),
+    weakTopics: [...new Set([
+      ...(Array.isArray(preferredTopics) ? preferredTopics : []),
+      ...weakTopics.map(w => w.topic),
+    ])].slice(0, 20),
     count: 5,
   };
 
@@ -26,7 +29,11 @@ export async function quizTier2(chunks, knowledgeState = {}) {
     tier: 'cloud',
     questions: (response.questions ?? []).map((q, i) => ({
       id: i + 1,
-      type: q.type ?? 'mcq',
+      type: ['multiple-choice', 'multiple_choice', 'multipleChoice', 'mcq'].includes(q.type)
+        ? 'multiple_choice'
+        : q.type === 'true_false' ? 'true_false'
+          : q.type === 'fill_in_blank' ? 'fill_in_blank'
+            : Array.isArray(q.options) && q.options.length ? 'multiple_choice' : 'fill_in_blank',
       topic: q.topic ?? '',
       question: q.prompt ?? q.question ?? '',
       options: q.options ?? null,

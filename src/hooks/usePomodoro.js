@@ -20,7 +20,7 @@
  * from the hook so it can be unit-tested with no React involvement. It never
  * mutates its input and never throws on valid state.
  */
-import { useEffect, useReducer, useRef, useCallback } from 'react';
+import { useEffect, useReducer, useRef, useCallback, useState } from 'react';
 import { getSetting, setSetting } from '../db/database.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -287,7 +287,7 @@ export function usePomodoro(options = {}) {
 
   const intervalRef = useRef(null);
   const restoredRef = useRef(false);
-  const focusPermissionRef = useRef(false);
+  const [focusPermission, setFocusPermissionState] = useState(false);
 
   // ── Restore persisted state once on mount ──────────────────────────────────
   useEffect(() => {
@@ -338,19 +338,21 @@ export function usePomodoro(options = {}) {
     if (!persist || !restoredRef.current) return;
     // Fire-and-forget; persistence must never block the UI.
     setSetting(POMODORO_STATE_KEY, toPersistedState(state)).catch(() => {});
-  }, [persist, state.phase, state.remainingMs, state.cycleCount, state.running]);
+  }, [persist, state.phase, state.remainingMs, state.cycleCount, state.running, state.config]);
 
   // ── Load the focus-mode permission on mount ─────────────────────────────────
   useEffect(() => {
     if (!persist) return;
+    let cancelled = false;
     (async () => {
       try {
         const granted = await getSetting(POMODORO_FOCUS_PERMISSION_KEY, false);
-        focusPermissionRef.current = Boolean(granted);
+        if (!cancelled) setFocusPermissionState(Boolean(granted));
       } catch {
-        focusPermissionRef.current = false;
+        if (!cancelled) setFocusPermissionState(false);
       }
     })();
+    return () => { cancelled = true; };
   }, [persist]);
 
   // ── Control callbacks ───────────────────────────────────────────────────────
@@ -366,7 +368,7 @@ export function usePomodoro(options = {}) {
   /** Grant or revoke the optional focus-mode permission (persisted, revocable). */
   const setFocusPermission = useCallback(
     async (granted) => {
-      focusPermissionRef.current = Boolean(granted);
+      setFocusPermissionState(Boolean(granted));
       if (persist) {
         try {
           await setSetting(POMODORO_FOCUS_PERMISSION_KEY, Boolean(granted));
@@ -385,7 +387,7 @@ export function usePomodoro(options = {}) {
     cycleCount: state.cycleCount,
     running: state.running,
     config: state.config,
-    isFocusPermissionGranted: focusPermissionRef.current,
+    isFocusPermissionGranted: focusPermission,
     // controls
     start,
     pause,

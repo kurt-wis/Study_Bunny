@@ -2,6 +2,12 @@
 # Study Bunny â€” App Specification v5.0 (FINAL)
 ## Offline-First AI Study Companion with Learning Technique Diagnosis
 
+> **Scope note:** this is an earlier, broader proposal. The current student-mode
+> requirements in `.kiro/specs/learning-techniques/requirements.md` and the
+> Session Matrix are authoritative for implementation; Teacher/Classroom mode
+> and techniques outside Pomodoro, Feynman, and Spaced Repetition are out of
+> scope. See `INTEGRATION.md` for the current data and API contract.
+
 **Build Deadline:** October 4, 2026, 10:00 AM
 **Team Size:** 4 developers
 **Track:** Educational Crisis â€” Build Over Nights 2026

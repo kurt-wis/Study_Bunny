@@ -87,11 +87,9 @@ export function confidenceToQuality(rating) {
 }
 
 /**
- * Derive the SM-2 `repetitions` streak from a persisted interval.
- *
- * `updateSchedule` persists only { interval, easeFactor, nextReviewDate }, so the
- * consecutive-success count isn't stored. SM-2's interval ladder is deterministic
- * (0 → 1 → 6 → round(prev * ease)), so we can recover the streak from the interval:
+ * Recover a streak for pre-existing rows that predate the additive repetitions
+ * field. New rows persist the exact count so a failed review can reset it safely.
+ * The legacy interval ladder is deterministic (0 → 1 → 6 → round(prev * ease)):
  *   interval 0  → reps 0 (never scheduled / relearning)
  *   interval 1  → reps 1 (first success, or just relearned)
  *   interval 6  → reps 2 (second success)
@@ -106,6 +104,11 @@ function repetitionsFromInterval(interval) {
   if (i <= 0) return 0;
   if (i <= 1) return 1;
   return 2;
+}
+
+function repetitionsForState(state = {}) {
+  if (Number.isFinite(state.repetitions)) return Math.max(0, Math.trunc(state.repetitions));
+  return repetitionsFromInterval(state.interval);
 }
 
 /**
@@ -129,12 +132,17 @@ export function qualityForAnswer(answer = {}) {
  * BKT mastery) are passed through as `weakTopics` for the generator to focus on.
  *
  * @param {number} documentId
- * @param {{ now?: Date, preference?: string }} [opts]
+ * @param {{ now?: Date, preference?: string, technique?: string|null }} [opts]
  * @returns {Promise<{ tier: string, questions: object[], quizId: number, dueTopics: object[] }>}
  */
 export async function startSession(documentId, opts = {}) {
   const now = opts.now ?? new Date();
   const dueTopics = await getDueTopics(documentId, now);
+  const knowledgeState = await getKnowledgeState(documentId);
+  const hasScheduledTopics = Object.values(knowledgeState).some(topic => topic.nextReviewDate != null);
+  if (dueTopics.length === 0 && hasScheduledTopics) {
+    return { tier: 'deterministic', questions: [], quizId: null, dueTopics };
+  }
   const weakTopics = dueTopics.map(t => t.topic);
 
   // Lazy-import the quiz engine so this module (and its pure/DB-only helpers) can
@@ -143,6 +151,7 @@ export async function startSession(documentId, opts = {}) {
   const quiz = await generateQuiz(documentId, {
     weakTopics,
     preference: opts.preference ?? null,
+    technique: opts.technique ?? null,
   });
 
   return { ...quiz, dueTopics };
@@ -169,9 +178,9 @@ export async function recordAnswer(documentId, topic, answer = {}, now = new Dat
   const current = state[topic] ?? {};
 
   // ── BKT mastery update (binary correctness signal) ──
-  const isCorrect = answer.confidence != null
-    ? answer.confidence === 'got_it'
-    : Boolean(answer.isCorrect);
+  const isCorrect = answer.isCorrect !== undefined
+    ? Boolean(answer.isCorrect)
+    : answer.confidence === 'got_it';
   const currentMastery = clampMastery(
     typeof current.mastery === 'number' ? current.mastery : getInitialMastery(),
   );
@@ -184,7 +193,7 @@ export async function recordAnswer(documentId, topic, answer = {}, now = new Dat
     {
       interval: current.interval,
       easeFactor: current.easeFactor,
-      repetitions: repetitionsFromInterval(current.interval),
+      repetitions: repetitionsForState(current),
     },
     quality,
     now,
@@ -192,6 +201,7 @@ export async function recordAnswer(documentId, topic, answer = {}, now = new Dat
   await updateSchedule(documentId, topic, {
     interval: next.interval,
     easeFactor: next.easeFactor,
+    repetitions: next.repetitions,
     nextReviewDate: next.nextReviewDate,
   });
 
@@ -201,6 +211,7 @@ export async function recordAnswer(documentId, topic, answer = {}, now = new Dat
     quality,
     interval: next.interval,
     easeFactor: next.easeFactor,
+    repetitions: next.repetitions,
     nextReviewDate: next.nextReviewDate,
   };
 }

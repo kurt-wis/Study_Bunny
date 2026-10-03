@@ -80,7 +80,7 @@ export function validateQuiz(obj, expectedCount = 5) {
     if (typeof q.answer !== 'string') throw new Error('question.answer must be a string');
     const out = {
       id: q.id,
-      type: q.type,
+      type: ['multiple-choice', 'multiple_choice', 'mcq'].includes(q.type) ? 'multiple-choice' : q.type,
       topic: q.topic,
       prompt: q.prompt,
       answer: q.answer,
@@ -91,6 +91,12 @@ export function validateQuiz(obj, expectedCount = 5) {
       }
       out.options = q.options;
     }
+    if (out.type === 'multiple-choice') {
+      if (!Array.isArray(out.options) || out.options.length < 2 || out.options.length > 6) {
+        throw new Error('multiple-choice questions require 2 to 6 options');
+      }
+      if (!out.options.includes(q.answer)) throw new Error('multiple-choice answer must match an option');
+    }
     if (q.explanation !== undefined) {
       if (typeof q.explanation !== 'string') throw new Error('question.explanation must be a string');
       out.explanation = q.explanation;
@@ -98,6 +104,46 @@ export function validateQuiz(obj, expectedCount = 5) {
     return out;
   });
   return { questions };
+}
+
+/** Validate the Feynman response schema before it reaches the client. */
+export function validateFeynman(obj) {
+  if (!isObj(obj)) throw new Error('feynman response must be an object');
+  if (typeof obj.coverage !== 'number' || !Number.isFinite(obj.coverage) || obj.coverage < 0 || obj.coverage > 1) {
+    throw new Error('coverage must be between 0 and 1');
+  }
+  const labels = (value, name) => {
+    if (!Array.isArray(value) || value.length > 30 || !value.every(v => typeof v === 'string' && v.trim().length > 0 && v.length <= 120)) {
+      throw new Error(`${name} must be a list of short strings`);
+    }
+    return value.map(v => v.trim());
+  };
+  if (typeof obj.feedback !== 'string' || obj.feedback.length > 1200) throw new Error('feedback must be a short string');
+  return {
+    coverage: obj.coverage,
+    covered: labels(obj.covered, 'covered'),
+    gaps: labels(obj.gaps, 'gaps'),
+    feedback: obj.feedback.trim(),
+  };
+}
+
+/** Validate the diagnosis response and prevent out-of-scope model suggestions. */
+export function validateTechniqueAnalysis(obj) {
+  if (!isObj(obj)) throw new Error('technique analysis must be an object');
+  if (!['feynman', 'spaced_repetition'].includes(obj.recommended_technique)) {
+    throw new Error('recommended technique is outside the supported set');
+  }
+  for (const key of ['analysis', 'evidence', 'expected_improvement']) {
+    if (typeof obj[key] !== 'string' || obj[key].trim().length === 0 || obj[key].length > 1200) {
+      throw new Error(`${key} must be a short string`);
+    }
+  }
+  return {
+    recommended_technique: obj.recommended_technique,
+    analysis: obj.analysis.trim(),
+    evidence: obj.evidence.trim(),
+    expected_improvement: obj.expected_improvement.trim(),
+  };
 }
 
 /**

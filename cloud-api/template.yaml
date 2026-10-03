@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Study Bunny cloud-api: an API Gateway HTTP API fronting four Node.js 24 Lambda
+  Study Bunny cloud-api: an API Gateway HTTP API fronting six Node.js 24 Lambda
   functions that proxy Amazon Bedrock (Claude 3 Haiku). CORS is locked to a
   single AllowedOrigin (no wildcard), each function is granted only
   bedrock:InvokeModel on the configured model ARN, and no secret values are
@@ -66,9 +66,15 @@ Resources:
         AllowHeaders:
           - Content-Type
         MaxAge: 300
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 10
+        ThrottlingRateLimit: 5
+      AccessLogSettings:
+        DestinationArn: !GetAtt HttpApiAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","routeKey":"$context.routeKey","status":"$context.status","responseLength":"$context.responseLength"}'
 
   # -------------------------------------------------------------------------
-  # Functions — one per frozen route. Each is granted only
+  # Functions — one per route. Each model-backed function is granted only
   # bedrock:InvokeModel on the model ARN derived from BedrockModelId.
   # -------------------------------------------------------------------------
   HealthFunction:
@@ -141,6 +147,44 @@ Resources:
             Method: POST
             Path: /api/chat
 
+  FeynmanFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/feynman.handler
+      Description: POST /api/feynman — evaluates an explanation against anonymous note chunks.
+      Policies:
+        - Statement:
+            - Sid: InvokeBedrockModelOnly
+              Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+      Events:
+        Feynman:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /api/feynman
+
+  AnalyzeTechniqueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/analyzeTechnique.handler
+      Description: POST /api/analyze-technique — recommends an in-scope study technique.
+      Policies:
+        - Statement:
+            - Sid: InvokeBedrockModelOnly
+              Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+      Events:
+        AnalyzeTechnique:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /api/analyze-technique
+
   # -------------------------------------------------------------------------
   # Log groups — explicit retention per function (content-free diagnostics).
   # Names match the Lambda default log group so the function writes into them.
@@ -167,6 +211,24 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub /aws/lambda/${ChatFunction}
+      RetentionInDays: !Ref LogRetentionInDays
+
+  FeynmanLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${FeynmanFunction}
+      RetentionInDays: !Ref LogRetentionInDays
+
+  AnalyzeTechniqueLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AnalyzeTechniqueFunction}
+      RetentionInDays: !Ref LogRetentionInDays
+
+  HttpApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/${AWS::StackName}/http-api
       RetentionInDays: !Ref LogRetentionInDays
 
 # ---------------------------------------------------------------------------

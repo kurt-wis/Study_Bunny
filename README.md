@@ -44,6 +44,19 @@ fully functional without it. Configure the frontend with the API URL by copying
 `.env.example` to `.env.local` and setting `VITE_API_BASE_URL`; leave it blank
 to run entirely offline.
 
+## Deploy to AWS
+
+This repository is configured for AWS Amplify Hosting (frontend) and AWS SAM
+(API Gateway, Lambda, and Bedrock). Build settings are in `amplify.yml`; the
+generated frontend artifact is `dist/`. Apply the SPA route rule in
+`amplify-rewrites.json` with `aws amplify update-app` after creating the Amplify
+app. Full deployment commands and ordering are in [`cloud-api/README.md`](./cloud-api/README.md).
+
+The frontend can be deployed first with `VITE_API_BASE_URL` unset and will work
+in offline mode. After deploying the API, set that Amplify build variable to the
+SAM stack's `ApiBaseUrl` output and rebuild. The API's `AllowedOrigin` parameter
+must exactly match the deployed Amplify origin.
+
 ## Project layout
 
 ```

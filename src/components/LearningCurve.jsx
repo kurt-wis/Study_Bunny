@@ -60,7 +60,7 @@ export default function LearningCurve({ points = [] }) {
         viewBox={`0 0 ${W} ${H}`}
         className="w-full h-auto"
         role="img"
-        aria-label="Learning curve: mastery per attempt over time. The full data is in the table below."
+        aria-label="Learning curve: mastery per attempt over time where saved; older attempts may show quiz accuracy. The full data is in the table below."
         preserveAspectRatio="xMidYMid meet"
       >
         {/* Gridlines + y-axis labels */}
@@ -165,7 +165,8 @@ export default function LearningCurve({ points = [] }) {
         <thead>
           <tr>
             <th scope="col">Attempt</th>
-            <th scope="col">Mastery</th>
+            <th scope="col">Value</th>
+            <th scope="col">Measure</th>
             <th scope="col">Score</th>
             <th scope="col">Technique</th>
             <th scope="col">Source</th>
@@ -177,7 +178,8 @@ export default function LearningCurve({ points = [] }) {
             <tr key={p.attempt}>
               <td>{p.attempt}</td>
               <td>{Math.round(p.mastery * 100)}%</td>
-              <td>{p.score}/{p.total}</td>
+              <td>{p.metric}</td>
+              <td>{p.score == null ? '—' : `${p.score}/${p.total}`}</td>
               <td>{seriesLabelFor(p.technique)}</td>
               <td>{p.source === 'review' ? 'Review' : 'Quiz'}</td>
               <td>

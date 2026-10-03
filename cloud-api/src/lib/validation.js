@@ -78,15 +78,17 @@ export function validateSummarize(body) {
   rejectForbiddenFields(body);
 
   const { chunks } = body;
-  if (!Array.isArray(chunks) || chunks.length === 0) {
+  if (!Array.isArray(chunks) || chunks.length === 0 || chunks.length > 100) {
     fail('chunks must be a non-empty array');
   }
+  let totalChars = 0;
   const normChunks = chunks.map((c) => {
     if (!isPlainObject(c)) fail('each chunk must be an object');
     rejectForbiddenFields(c);
-    if (typeof c.text !== 'string' || c.text.length === 0) {
+    if (typeof c.text !== 'string' || c.text.length === 0 || c.text.length > 12000) {
       fail('each chunk requires a non-empty text string');
     }
+    totalChars += c.text.length;
     const out = { text: c.text };
     if (c.page !== undefined) {
       if (typeof c.page !== 'number' || !Number.isFinite(c.page)) fail('page must be a number');
@@ -95,9 +97,10 @@ export function validateSummarize(body) {
     return out;
   });
 
+  if (totalChars > 220000) fail('source notes are too long for one request');
   const result = { chunks: normChunks };
   if (body.language !== undefined) {
-    if (typeof body.language !== 'string') fail('language must be a string');
+    if (typeof body.language !== 'string' || body.language.length > 80) fail('language must be a short string');
     result.language = body.language;
   }
   return result;
@@ -115,24 +118,27 @@ export function validateQuiz(body) {
   rejectForbiddenFields(body);
 
   const { chunks, weakTopics } = body;
-  if (!Array.isArray(chunks) || chunks.length === 0) {
+  if (!Array.isArray(chunks) || chunks.length === 0 || chunks.length > 100) {
     fail('chunks must be a non-empty array');
   }
+  let totalChars = 0;
   const normChunks = chunks.map((c) => {
     if (!isPlainObject(c)) fail('each chunk must be an object');
     rejectForbiddenFields(c);
     if (typeof c.chunkId !== 'string' || c.chunkId.length === 0) {
       fail('each chunk requires a non-empty chunkId string');
     }
-    if (typeof c.text !== 'string' || c.text.length === 0) {
+    if (typeof c.text !== 'string' || c.text.length === 0 || c.text.length > 12000) {
       fail('each chunk requires a non-empty text string');
     }
+    totalChars += c.text.length;
     return { chunkId: c.chunkId, text: c.text };
   });
+  if (totalChars > 220000) fail('source notes are too long for one request');
 
   let normTopics = [];
   if (weakTopics !== undefined) {
-    if (!Array.isArray(weakTopics) || !weakTopics.every((t) => typeof t === 'string')) {
+    if (!Array.isArray(weakTopics) || weakTopics.length > 20 || !weakTopics.every((t) => typeof t === 'string' && t.length <= 120)) {
       fail('weakTopics must be an array of strings');
     }
     normTopics = weakTopics;
@@ -140,8 +146,8 @@ export function validateQuiz(body) {
 
   let count = 5;
   if (body.count !== undefined) {
-    if (typeof body.count !== 'number' || !Number.isInteger(body.count) || body.count <= 0) {
-      fail('count must be a positive integer');
+    if (typeof body.count !== 'number' || !Number.isInteger(body.count) || body.count <= 0 || body.count > 10) {
+      fail('count must be an integer between 1 and 10');
     }
     count = body.count;
   }
@@ -160,22 +166,24 @@ export function validateChat(body) {
   if (!isPlainObject(body)) fail('Request body must be an object');
   rejectForbiddenFields(body);
 
-  if (typeof body.question !== 'string' || body.question.trim().length === 0) {
+  if (typeof body.question !== 'string' || body.question.trim().length === 0 || body.question.length > 4000) {
     fail('question must be a non-empty string');
   }
   const { chunks } = body;
-  if (!Array.isArray(chunks) || chunks.length === 0) {
+  if (!Array.isArray(chunks) || chunks.length === 0 || chunks.length > 100) {
     fail('chunks must be a non-empty array');
   }
+  let totalChars = 0;
   const normChunks = chunks.map((c) => {
     if (!isPlainObject(c)) fail('each chunk must be an object');
     rejectForbiddenFields(c);
     if (typeof c.chunkId !== 'string' || c.chunkId.length === 0) {
       fail('each chunk requires a non-empty chunkId string');
     }
-    if (typeof c.text !== 'string' || c.text.length === 0) {
+    if (typeof c.text !== 'string' || c.text.length === 0 || c.text.length > 12000) {
       fail('each chunk requires a non-empty text string');
     }
+    totalChars += c.text.length;
     const out = { chunkId: c.chunkId, text: c.text };
     if (c.page !== undefined) {
       if (typeof c.page !== 'number' || !Number.isFinite(c.page)) fail('page must be a number');
@@ -183,6 +191,7 @@ export function validateChat(body) {
     }
     return out;
   });
+  if (totalChars > 220000) fail('source notes are too long for one request');
 
   return { question: body.question, chunks: normChunks };
 }
@@ -225,5 +234,63 @@ export function validateIntervention(body) {
     groupSize: body.groupSize,
     availableMaterials: body.availableMaterials,
     language: body.language,
+  };
+}
+
+/**
+ * Validate POST /api/feynman. Only an explanation, topic label, and anonymous
+ * note chunks cross the network. Request limits keep prompt size and cost bounded.
+ */
+export function validateFeynman(body) {
+  if (!isPlainObject(body)) fail('Request body must be an object');
+  rejectForbiddenFields(body);
+  if (typeof body.explanation !== 'string' || !body.explanation.trim() || body.explanation.length > 8000) {
+    fail('explanation must be a non-empty string of at most 8000 characters');
+  }
+  if (body.topic != null && (typeof body.topic !== 'string' || body.topic.length > 120)) {
+    fail('topic must be a short string');
+  }
+  if (!Array.isArray(body.chunks) || body.chunks.length === 0 || body.chunks.length > 100) {
+    fail('chunks must contain between 1 and 100 items');
+  }
+  let totalChars = 0;
+  const chunks = body.chunks.map((c) => {
+    if (!isPlainObject(c)) fail('each chunk must be an object');
+    rejectForbiddenFields(c);
+    if ((typeof c.chunkId !== 'string' && typeof c.chunkId !== 'number') || String(c.chunkId).length > 80) {
+      fail('each chunk requires a short chunkId');
+    }
+    if (typeof c.text !== 'string' || !c.text.trim() || c.text.length > 12000) {
+      fail('each chunk requires text of at most 12000 characters');
+    }
+    totalChars += c.text.length;
+    return { chunkId: String(c.chunkId), text: c.text };
+  });
+  if (totalChars > 220000) fail('source notes are too long for one request');
+  return { explanation: body.explanation.trim(), topic: body.topic?.trim() || null, chunks };
+}
+
+/** Validate POST /api/analyze-technique; only anonymous study metadata is accepted. */
+export function validateTechniqueAnalysis(body) {
+  if (!isPlainObject(body)) fail('Request body must be an object');
+  rejectForbiddenFields(body);
+  const habits = ['rereading', 'highlighting', 'summarizing', 'flashcards', 'pomodoro', 'feynman', 'spaced_repetition'];
+  if (body.currentHabit != null && !habits.includes(body.currentHabit)) fail('currentHabit is not recognized');
+  const weakTopics = body.weakTopics ?? [];
+  if (!Array.isArray(weakTopics) || weakTopics.length > 20 || !weakTopics.every(t => typeof t === 'string' && t.trim().length <= 120)) {
+    fail('weakTopics must be short labels');
+  }
+  const masteryHistory = body.masteryHistory ?? [];
+  if (!Array.isArray(masteryHistory) || masteryHistory.length > 12 || !masteryHistory.every(m => typeof m === 'number' && Number.isFinite(m) && m >= 0 && m <= 1)) {
+    fail('masteryHistory must contain up to 12 values between 0 and 1');
+  }
+  if (body.topicType != null && (typeof body.topicType !== 'string' || body.topicType.length > 120)) {
+    fail('topicType must be a short string');
+  }
+  return {
+    currentHabit: body.currentHabit ?? null,
+    weakTopics: weakTopics.map(t => t.trim()).filter(Boolean),
+    masteryHistory,
+    topicType: body.topicType?.trim() || null,
   };
 }

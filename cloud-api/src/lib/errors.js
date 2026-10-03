@@ -8,6 +8,7 @@
 /** Stable machine-readable error codes exposed to the client. */
 export const CODES = Object.freeze({
   VALIDATION_ERROR: 'VALIDATION_ERROR',
+  PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   UPSTREAM_ERROR: 'UPSTREAM_ERROR',
   METHOD_NOT_ALLOWED: 'METHOD_NOT_ALLOWED',
 });
