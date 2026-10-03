@@ -1,0 +1,293 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1. Data layer: additive Dexie version 2": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053937281
+      },
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053945842
+      },
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791054187762
+      }
+    ],
+    "2. Technique engine + recommendation": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053937378
+      },
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791054195464
+      },
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791054346662
+      }
+    ],
+    "3.1 `services/spacedRepetition/sm2.js` — pure SM-2 with clamping; unit tests for": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053937460
+      },
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791054354975
+      },
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791054483023
+      }
+    ],
+    "3.2 `services/spacedRepetition/index.js` — `getDueTopics` ordering and a session": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053937536
+      },
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791054490999
+      },
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791054874500
+      }
+    ],
+    "4.1 `services/feynman/feynmanTier3.js` — TF-IDF coverage + unmatched-keyword gaps": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053937619
+      },
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791054884100
+      },
+      {
+        "executionId": "2f61f13d-ddd5-4b53-ad85-c7f46ce6ea6f",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055000173
+      },
+      {
+        "executionId": "2f61f13d-ddd5-4b53-ad85-c7f46ce6ea6f",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055301036
+      }
+    ],
+    "4.2 `services/feynman/feynmanTier2.js` — cloud evaluation via `apiPost('/api/feynman')`": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053937712
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055351622
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055557015
+      }
+    ],
+    "4.3 `services/feynman/index.js` — tier router with mid-flight fallback to Tier 3": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053937780
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055566107
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055761124
+      }
+    ],
+    "5.1 `hooks/usePomodoro.js` — reducer state machine, interval ticking, persist to": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053937854
+      },
+      {
+        "executionId": "2f61f13d-ddd5-4b53-ad85-c7f46ce6ea6f",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055003784
+      },
+      {
+        "executionId": "2f61f13d-ddd5-4b53-ad85-c7f46ce6ea6f",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055305797
+      }
+    ],
+    "5.2 `components/PomodoroTimer.jsx` — controls (≥48px), live-region phase": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053937933
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055355601
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055561163
+      }
+    ],
+    "6. Technique diagnosis": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053938004
+      },
+      {
+        "executionId": "2f61f13d-ddd5-4b53-ad85-c7f46ce6ea6f",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055007217
+      },
+      {
+        "executionId": "2f61f13d-ddd5-4b53-ad85-c7f46ce6ea6f",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055309854
+      }
+    ],
+    "7. Wire technique selection + Pomodoro into existing screens": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053938075
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055779196
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791056119123
+      }
+    ],
+    "8. Review section": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053938151
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791056123464
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791056470827
+      }
+    ],
+    "9. Dashboard + learning curve": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053938226
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791056475505
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791056776077
+      }
+    ],
+    "10. Cloud API endpoints (optional Tier 2) — gated on review decision #3": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053938300
+      }
+    ],
+    "11. Accessibility + tier-badge pass": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053938376
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791056850348
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791057195880
+      }
+    ],
+    "12. End-to-end verification": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791053938442
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791057201774
+      },
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791057338522
+      }
+    ],
+    "3. Spaced Repetition engine (SM-2)": [
+      {
+        "executionId": "2b7eb290-8a1b-44b8-899c-bbc5fe2eaf53",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791054874646
+      }
+    ],
+    "5. Pomodoro": [
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055561277
+      }
+    ],
+    "4. Feynman service": [
+      {
+        "executionId": "5d67e25f-e7dd-4649-b410-8479bbb9c157",
+        "chatSessionId": "sess_8d577056-7ee6-4eb1-8f0a-4aafe58fa0a2",
+        "timestamp": 1791055761265
+      }
+    ]
+  }
+}

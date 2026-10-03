@@ -1,0 +1,4 @@
+Technique,In Quiz Session,In Review Session,Tier Compatibility,New Data Needed
+Pomodoro,"Timed quiz blocks with optional phone-lock (permission-based, revocable)",Timed review blocks for summaries/notes chat,All tiers (pure client-side),"appSettings: focusMode permission, timer state"
+Feynman,Post-quiz "explain this topic" prompt; AI evaluates or self-compare,"Explain without looking" during summary review; hide-then-reveal,Tier 2 for AI evaluation; Tier 3 for keyword self-compare,Feynman attempts stored with quiz/review records
+Spaced Repetition,Topics prioritized by nextReviewDate + BKT mastery; intervals adapt after each quiz,Concepts surfaced by due date; student rates confidence; learning curve shown,All tiers (deterministic SM-2 algorithm),"knowledgeState: +nextReviewDate, +interval, +easeFactor"

@@ -1,0 +1,29 @@
+{
+  "overview": "This passage explains how the water cycle moves water between the ocean, atmosphere, and land through evaporation, condensation, and precipitation.",
+  "keyConcepts": [
+    {
+      "term": "Evaporation",
+      "explanation": "The sun heats water in oceans and lakes, turning it into water vapor that rises into the air.",
+      "importance": "It is the step that lifts water from the surface into the atmosphere.",
+      "commonMistakes": "Students confuse evaporation with boiling; evaporation happens at any temperature, not only at boiling point."
+    },
+    {
+      "term": "Condensation",
+      "explanation": "Water vapor cools high in the atmosphere and changes back into tiny liquid droplets that form clouds.",
+      "importance": "It is how clouds form before rain can fall.",
+      "commonMistakes": "Thinking clouds are made of water vapor; clouds are made of condensed liquid droplets."
+    },
+    {
+      "term": "Precipitation",
+      "explanation": "When droplets in clouds grow heavy enough, they fall as rain, snow, or hail.",
+      "importance": "It returns water from the atmosphere back to the land and ocean.",
+      "commonMistakes": "Assuming precipitation is only rain; snow and hail are also precipitation."
+    }
+  ],
+  "studyOutline": [
+    "Review the three main stages: evaporation, condensation, precipitation.",
+    "Explain the energy source that drives the cycle (the sun).",
+    "Describe how water returns to the ocean through runoff.",
+    "Practice drawing and labeling a diagram of the water cycle."
+  ]
+}

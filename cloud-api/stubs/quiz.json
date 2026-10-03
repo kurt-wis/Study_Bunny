@@ -1,0 +1,49 @@
+{
+  "questions": [
+    {
+      "id": "q1",
+      "type": "multiple-choice",
+      "topic": "Evaporation",
+      "prompt": "What causes water to evaporate from the ocean?",
+      "options": ["Heat from the sun", "Cold air at night", "Ocean currents", "Falling rain"],
+      "answer": "Heat from the sun",
+      "explanation": "The sun's heat gives surface water enough energy to turn into vapor. The other options describe unrelated processes."
+    },
+    {
+      "id": "q2",
+      "type": "multiple-choice",
+      "topic": "Condensation",
+      "prompt": "What forms when water vapor cools in the atmosphere?",
+      "options": ["Clouds", "Rivers", "Soil", "Wind"],
+      "answer": "Clouds",
+      "explanation": "Cooling vapor condenses into droplets that make clouds. Rivers and soil are on the ground, and wind is moving air."
+    },
+    {
+      "id": "q3",
+      "type": "multiple-choice",
+      "topic": "Precipitation",
+      "prompt": "Which of these is a form of precipitation?",
+      "options": ["Snow", "Fog", "Dew", "Humidity"],
+      "answer": "Snow",
+      "explanation": "Snow falls from clouds, so it is precipitation. Fog, dew, and humidity are not falling water."
+    },
+    {
+      "id": "q4",
+      "type": "multiple-choice",
+      "topic": "Water cycle",
+      "prompt": "What drives the entire water cycle?",
+      "options": ["The sun's energy", "The moon's gravity", "Earth's rotation", "Volcanic heat"],
+      "answer": "The sun's energy",
+      "explanation": "Solar energy powers evaporation and keeps the cycle moving. The other forces do not drive the cycle."
+    },
+    {
+      "id": "q5",
+      "type": "multiple-choice",
+      "topic": "Runoff",
+      "prompt": "How does most water return to the ocean after it rains on land?",
+      "options": ["Runoff in rivers and streams", "Evaporating instantly", "Freezing into glaciers forever", "Disappearing underground permanently"],
+      "answer": "Runoff in rivers and streams",
+      "explanation": "Rainwater flows downhill through rivers and streams back to the ocean. The other options stop the cycle."
+    }
+  ]
+}

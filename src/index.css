@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Ensure all interactive elements meet 48px touch target */
+  button, [role="button"], a, input, select, textarea {
+    min-height: 48px;
+  }
+}
+
+@layer utilities {
+  .touch-target {
+    min-height: 48px;
+    min-width: 48px;
+  }
+}

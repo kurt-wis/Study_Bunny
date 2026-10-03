@@ -1,0 +1,13 @@
+{
+  "name": "cloud-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Study Bunny cloud AI backend: API Gateway HTTP API + Lambda proxying Amazon Bedrock.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.670.0"
+  }
+}
