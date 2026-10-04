@@ -70,6 +70,8 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Check with AI', exact: true }).isDisabled(), true, 'AI requires explicit preview review');
   await page.getByLabel(/I reviewed the redacted previews/).check();
   await page.getByLabel('Reference text or excerpt').fill('Water boils at 100 degrees Celsius.');
+  // Wait for React useEffect to reset the review checkbox when reference changes
+  await page.getByLabel(/I reviewed the redacted previews/).waitFor({ state: 'unchecked' });
   assert.equal(await page.getByLabel(/I reviewed the redacted previews/).isChecked(), false, 'editing resets review');
   await page.getByLabel(/I reviewed the redacted previews/).check();
   await page.getByRole('button', { name: 'Check with AI', exact: true }).click();
