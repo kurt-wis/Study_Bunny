@@ -48,7 +48,7 @@ Pick one AI service. The app works with any of these; only the settings differ.
    | `AI_PROVIDER` | one of the names above |
    | `AI_API_KEY` | the key from step 1 |
    | `AI_MODEL` | a model ID copied from that service's current model list |
-   | `ACCESS_CODE` | a long code you make up and share with your students |
+   | `ACCESS_CODE` | optional. A long code you make up and share with your students. Leave it out for an open demo (see below) |
    | `DAILY_REQUEST_LIMIT` | optional, default `20` |
 
    Never prefix these with `VITE_`: that would publish them in the app.
@@ -57,6 +57,13 @@ Pick one AI service. The app works with any of these; only the settings differ.
 5. In the app: **Profile → Optional Cloud AI**, tick the consent box, enter the
    access code, save. Summaries, quizzes, chat, Feynman feedback, technique
    suggestions and note checking now show the **Cloud AI** badge.
+
+Open demo mode (no `ACCESS_CODE`):
+
+- Students only tick the consent box; nothing to type.
+- Anyone who can open the site can use Cloud AI and spend your allowance. The
+  only limits are the daily limit per IP address and the service's own quota.
+- Use it for a demo, then set `ACCESS_CODE` and redeploy before sharing widely.
 
 About free tiers:
 

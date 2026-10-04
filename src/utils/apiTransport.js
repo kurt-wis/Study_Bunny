@@ -6,7 +6,7 @@
  */
 
 import { sanitizePayload } from '../../cloud-api/src/lib/privacy.js';
-import { cloudEnabled, getAccessCode } from './cloudSession.js';
+import { cloudEnabled, getAccessCode, setHealthProbe } from './cloudSession.js';
 
 const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 const DEFAULT_TIMEOUT_MS = 28_000;
@@ -30,7 +30,7 @@ class ApiError extends Error {
  * @returns {Promise<object>} parsed JSON response
  */
 export async function apiPost(path, body, timeoutMs = DEFAULT_TIMEOUT_MS) {
-  if (!await cloudEnabled()) throw new ApiError('Turn on Cloud AI and enter your access code first.', 401);
+  if (!await cloudEnabled()) throw new ApiError('Turn on Cloud AI first (and enter the access code if this site asks for one).', 401);
   const code = await getAccessCode();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -66,18 +66,27 @@ export async function apiPost(path, body, timeoutMs = DEFAULT_TIMEOUT_MS) {
 
 /**
  * GET /api/health — lightweight availability check.
- * Returns true only for a successful JSON liveness response.
+ * Returns { ok, codeRequired }: `ok` only for a successful JSON liveness
+ * response; `codeRequired` is false when the site runs in open demo mode.
  */
-export async function apiHealthCheck(timeoutMs = 5_000) {
+export async function apiHealthInfo(timeoutMs = 5_000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${API_BASE_URL}/api/health`, { signal: controller.signal });
-    return res.ok && (await res.json()).status === 'ok';
+    const body = res.ok ? await res.json() : null;
+    return { ok: body?.status === 'ok', codeRequired: body?.accessCode !== 'none' };
   } catch {
-    clearTimeout(timer);
-    return false;
+    return { ok: false, codeRequired: true };
   } finally {
     clearTimeout(timer);
   }
 }
+
+/** True only when the cloud API answers with a healthy JSON response. */
+export async function apiHealthCheck(timeoutMs = 5_000) {
+  return (await apiHealthInfo(timeoutMs)).ok;
+}
+
+// cloudSession asks this module whether the site needs an access code.
+setHealthProbe(apiHealthInfo);

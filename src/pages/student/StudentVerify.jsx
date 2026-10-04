@@ -83,7 +83,7 @@ export default function StudentVerify() {
   async function check() {
     setBusy(true); setError(''); setResult(null); setProgress(useCloud ? 'Checking claims against your reference…' : 'Comparing statements locally…');
     try {
-      if (useCloud && !await cloudEnabled()) throw new Error('Turn on Cloud AI and enter your access code in the Optional Cloud AI box above before AI checking. If that box says Cloud AI is not available, this site has not been set up for it yet: use Compare offline instead.');
+      if (useCloud && !await cloudEnabled()) throw new Error('Turn on Cloud AI and enter your access code (if this site asks for one) in the Optional Cloud AI box above before AI checking. If that box says Cloud AI is not available, this site has not been set up for it yet: use Compare offline instead.');
       const report = { ...await verifyNotes({ notes, reference, customTerms: terms, useCloud, reviewed }), referenceTitle };
       setResult(report);
       try { await saveVerificationReport(docId, report); setHistory(await getVerificationReports(docId)); }

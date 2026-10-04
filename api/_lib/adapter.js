@@ -4,8 +4,10 @@
  * { statusCode, headers, body }.
  *
  * It also guards the AI routes:
- *   - the server must be configured (API key, model, access code);
- *   - the request must carry the shared access code (X-Study-Bunny-Code);
+ *   - the server must be configured (AI provider, key and model);
+ *   - if ACCESS_CODE is set, the request must carry it (X-Study-Bunny-Code).
+ *     With no ACCESS_CODE the site is in open "demo" mode: anyone who can
+ *     open the site can use Cloud AI, limited only by the daily limit per IP;
  *   - browser requests must come from this site (same-origin).
  * Files and folders starting with "_" under /api are not routes.
  */
@@ -30,9 +32,14 @@ export function accessCodeMatches(supplied, expected) {
   return timingSafeEqual(digest(supplied), digest(expected));
 }
 
-/** Server is ready for AI calls only when all three settings exist. */
+/** Server is ready for AI calls when the AI provider, key and model are set. */
 export function cloudReady(env = process.env) {
-  return modelConfigured(env) && Boolean(env.ACCESS_CODE);
+  return modelConfigured(env);
+}
+
+/** Whether students must type an access code (false = open demo mode). */
+export function codeRequired(env = process.env) {
+  return Boolean(env.ACCESS_CODE);
 }
 
 function sameOrigin(req) {
@@ -68,11 +75,11 @@ export function toVercel(handler, { protect = true } = {}) {
     if (protect) {
       if (!cloudReady(env)) return send(res, 503, { error: 'Cloud AI is not set up on this site.', code: 'NOT_CONFIGURED' });
       if (!sameOrigin(req)) return send(res, 403, { error: 'Requests must come from the Study Bunny site.', code: 'FORBIDDEN' });
-      if (!accessCodeMatches(req.headers['x-study-bunny-code'], env.ACCESS_CODE)) {
+      if (codeRequired(env) && !accessCodeMatches(req.headers['x-study-bunny-code'], env.ACCESS_CODE)) {
         return send(res, 401, { error: 'That access code is not right. Check it in Profile.', code: 'UNAUTHORIZED' });
       }
     }
-    const code = digest(req.headers['x-study-bunny-code']).toString('hex').slice(0, 12);
+    const code = codeRequired(env) ? digest(req.headers['x-study-bunny-code']).toString('hex').slice(0, 12) : 'open';
     const event = {
       requestContext: { http: { method: req.method } },
       body: bodyText(req),

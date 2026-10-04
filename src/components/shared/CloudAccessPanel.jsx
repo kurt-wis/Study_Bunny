@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { getAccessCode, setAccessCode, disableCloud } from '../../utils/cloudSession.js';
-import { apiHealthCheck } from '../../utils/apiTransport.js';
+import { apiHealthInfo } from '../../utils/apiTransport.js';
 import { getSetting, setSetting } from '../../db/database.js';
 import { invalidateHealthCache } from '../../utils/tierDetection.js';
 
@@ -10,6 +10,7 @@ import { invalidateHealthCache } from '../../utils/tierDetection.js';
  */
 export default function CloudAccessPanel() {
   const [available, setAvailable] = useState(null); // null = checking
+  const [needsCode, setNeedsCode] = useState(true); // false when the site is in open demo mode
   const [consent, setConsent] = useState(false);
   const [code, setCode] = useState('');
   const [savedCode, setSavedCode] = useState('');
@@ -22,13 +23,15 @@ export default function CloudAccessPanel() {
     Promise.all([getSetting('cloudConsent', false), getAccessCode()])
       .then(([enabled, stored]) => { if (active) { setConsent(Boolean(enabled)); setSavedCode(stored); setCode(stored); setLoaded(true); } })
       .catch(() => { if (active) setError('Could not read cloud preferences.'); });
-    apiHealthCheck().then(ok => { if (active) setAvailable(ok); }).catch(() => { if (active) setAvailable(false); });
+    apiHealthInfo().then(info => { if (active) { setAvailable(info.ok); setNeedsCode(info.codeRequired); } }).catch(() => { if (active) setAvailable(false); });
     return () => { active = false; };
   }, []);
 
   async function changeConsent(value) {
-    try { setError(''); setNotice(''); await setSetting('cloudConsent', value); setConsent(value); invalidateHealthCache(); }
-    catch { setError('Could not save your cloud preference.'); }
+    // Show the change straight away; undo it if it cannot be saved.
+    setError(''); setNotice(''); setConsent(value);
+    try { await setSetting('cloudConsent', value); invalidateHealthCache(); }
+    catch { setConsent(!value); setError('Could not save your cloud preference.'); }
   }
 
   async function saveCode(e) {
@@ -47,7 +50,7 @@ export default function CloudAccessPanel() {
     catch { setError('Could not turn Cloud AI off.'); }
   }
 
-  const ready = consent && Boolean(savedCode);
+  const ready = consent && (Boolean(savedCode) || !needsCode);
 
   return (
     <section className="sb-card p-[22px]" aria-labelledby="cloud-ai-title">
@@ -66,30 +69,36 @@ export default function CloudAccessPanel() {
             <input className="mt-1" type="checkbox" checked={consent} disabled={!loaded} onChange={e => changeConsent(e.target.checked)} />
             <span>Allow text from my notes to be sent to Cloud AI for summaries, quizzes, chat, explanations and note checking.</span>
           </label>
-          <form onSubmit={saveCode} className="flex flex-wrap items-end gap-3">
-            <label className="flex-1 basis-[220px] text-xs font-bold">
-              Access code
-              <input
-                className="sb-input mt-1"
-                style={{ minHeight: 48 }}
-                type="password"
-                value={code}
-                disabled={!loaded}
-                onChange={e => setCode(e.target.value)}
-                autoComplete="off"
-                maxLength={100}
-                placeholder="Code from your teacher or team"
-              />
-            </label>
-            <button type="submit" className="sb-btn" disabled={code.trim() === savedCode}>Save code</button>
-            {(consent || savedCode) && <button type="button" className="sb-btn-ghost" onClick={turnOff}>Turn off Cloud AI</button>}
-          </form>
+          {needsCode ? (
+            <form onSubmit={saveCode} className="flex flex-wrap items-end gap-3">
+              <label className="flex-1 basis-[220px] text-xs font-bold">
+                Access code
+                <input
+                  className="sb-input mt-1"
+                  style={{ minHeight: 48 }}
+                  type="password"
+                  value={code}
+                  disabled={!loaded}
+                  onChange={e => setCode(e.target.value)}
+                  autoComplete="off"
+                  maxLength={100}
+                  placeholder="Code from your teacher or team"
+                />
+              </label>
+              <button type="submit" className="sb-btn" disabled={code.trim() === savedCode}>Save code</button>
+              {(consent || savedCode) && <button type="button" className="sb-btn-ghost" onClick={turnOff}>Turn off Cloud AI</button>}
+            </form>
+          ) : (
+            (consent || savedCode) && <button type="button" className="sb-btn-ghost" onClick={turnOff}>Turn off Cloud AI</button>
+          )}
           <p className="text-xs sb-muted mt-2" role="status">
             {available === null
               ? 'Checking whether Cloud AI is available…'
               : ready
                 ? 'Cloud AI is on for this device. If the code is wrong or the daily limit is reached, Study Bunny falls back to offline mode.'
-                : 'To use Cloud AI, tick the box and save the access code. Offline tools work without it.'}
+                : needsCode
+                  ? 'To use Cloud AI, tick the box and save the access code. Offline tools work without it.'
+                  : 'No access code is needed on this site. Tick the box to use Cloud AI. Offline tools work without it.'}
           </p>
         </>
       )}

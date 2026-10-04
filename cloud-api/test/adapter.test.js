@@ -21,7 +21,8 @@ test('access code comparison and readiness', () => {
   assert.equal(accessCodeMatches(undefined, 'bunny-123'), false);
   assert.equal(accessCodeMatches('', ''), false);
   assert.equal(cloudReady(READY), true);
-  assert.equal(cloudReady({ ...READY, ACCESS_CODE: '' }), false);
+  assert.equal(cloudReady({ ...READY, ACCESS_CODE: '' }), true); // open demo mode
+  assert.equal(cloudReady({ ACCESS_CODE: 'x' }), false);
 });
 test('protected routes refuse when unconfigured, cross-origin, or the code is wrong', async () => {
   const fn = toVercel(echo);
@@ -47,4 +48,23 @@ test('a valid request reaches the handler with method, body and a client id', as
     assert.match(event.clientId, /^[0-9a-f]{12}:203\.0\.113\.9$/);
     assert.equal('Access-Control-Allow-Origin' in res.headers, false);
   });
+});
+
+test('with no ACCESS_CODE the site is open: no code needed, still same-origin and rate-limited per IP', async () => {
+  await withEnv({ ...READY, ACCESS_CODE: undefined }, async () => {
+    delete process.env.ACCESS_CODE;
+    let res = fakeRes();
+    await toVercel(echo)({ method: 'POST', headers: { origin: 'https://app.example', host: 'app.example', 'x-forwarded-for': '203.0.113.9' }, body: {} }, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).clientId, 'open:203.0.113.9');
+    res = fakeRes();
+    await toVercel(echo)({ method: 'POST', headers: { origin: 'https://evil.example', host: 'app.example' }, body: {} }, res);
+    assert.equal(res.statusCode, 403);
+  });
+});
+test('health reports whether a code is required', async () => {
+  const health = (await import('../../api/health.js')).default;
+  await withEnv(READY, async () => { const res = fakeRes(); health({ method: 'GET', headers: {} }, res); assert.deepEqual(JSON.parse(res.body), { status: 'ok', accessCode: 'required' }); });
+  await withEnv({ ...READY }, async () => { delete process.env.ACCESS_CODE; const res = fakeRes(); health({ method: 'GET', headers: {} }, res); assert.deepEqual(JSON.parse(res.body), { status: 'ok', accessCode: 'none' }); });
+  await withEnv({}, async () => { const res = fakeRes(); health({ method: 'GET', headers: {} }, res); assert.equal(res.statusCode, 503); });
 });

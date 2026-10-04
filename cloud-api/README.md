@@ -23,11 +23,11 @@ OpenRouter or Anthropic. See [DEPLOYMENT.md](../DEPLOYMENT.md).
 | `AI_API_KEY` | Secret key from that service. Server only. |
 | `AI_MODEL` | Model ID to call, copied from that service's model list. |
 | `AI_BASE_URL`, `AI_JSON_MODE` | Optional: another OpenAI-compatible endpoint; `off` to disable JSON mode. |
-| `ACCESS_CODE` | Shared code students enter in Profile. Sent as `X-Study-Bunny-Code`. |
+| `ACCESS_CODE` | Optional. Shared code students enter in Profile, sent as `X-Study-Bunny-Code`. Unset = open demo mode: no code, anyone on the site can use Cloud AI. |
 | `DAILY_REQUEST_LIMIT` | AI requests per device per UTC day (default 20). |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Optional. Accurate daily limit shared by all server instances. |
 
-If the provider, key, model or access code is missing, `/api/health` reports
+If the provider, key or model is missing, `/api/health` reports
 `not_configured`, the AI routes return 503, and the app stays in offline mode.
 
 ## Protection and limits
