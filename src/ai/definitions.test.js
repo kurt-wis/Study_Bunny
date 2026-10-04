@@ -52,3 +52,19 @@ test('term on one line with its meaning on the next, when the handout repeats th
   assert.equal(defs[0].definition, 'the control centre of the cell that stores DNA');
   assert.deepEqual(extractDefinitions('Introduction\nthis chapter talks about many different things in detail\nand it goes on for a while without defining anything.'), []);
 });
+
+test('a sentence with a dash is not read as a term and its meaning', () => {
+  const found = extractDefinitions([
+    'Jose Rizal achieved - academic excellence and was a staunch critic of the government during his time.',
+    'The reforms were - widely debated in the colony.',
+    'Propaganda Movement - a campaign for reforms led by Filipino expatriates',
+    'La Solidaridad - the newspaper of the reform movement',
+    'Lessons Learned - what the group took away from the campaign',
+  ].join('\n'));
+  const terms = found.map(d => d.term);
+  assert.ok(!terms.includes('Jose Rizal achieved'));
+  assert.ok(!terms.some(t => /were$/.test(t)));
+  assert.ok(terms.includes('Propaganda Movement'));
+  assert.ok(terms.includes('La Solidaridad'));
+  assert.ok(terms.includes('Lessons Learned'), 'capitalised headings are kept');
+});

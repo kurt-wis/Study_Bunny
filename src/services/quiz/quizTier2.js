@@ -3,6 +3,7 @@
  */
 import { apiPost } from '../../utils/apiTransport.js';
 import { buildDifficultyInstruction } from '../difficultyBuilder.js';
+import { normalizeCloudQuiz } from './cloudQuestions.js';
 
 /**
  * Generate cloud-AI quiz questions.
@@ -22,17 +23,10 @@ export async function quizTier2(chunks, knowledgeState = {}) {
 
   const response = await apiPost('/api/quiz', payload);
 
-  return {
-    tier: 'cloud',
-    questions: (response.questions ?? []).map((q, i) => ({
-      id: i + 1,
-      type: q.type ?? 'mcq',
-      topic: q.topic ?? '',
-      question: q.prompt ?? q.question ?? '',
-      options: q.options ?? null,
-      correct_answer: q.answer ?? q.correct_answer ?? '',
-      explanation: q.explanation ?? '',
-      difficulty: 'standard',
-    })),
-  };
+  // The model labels and formats its questions loosely; make every one a shape
+  // the quiz screen can show and answer.
+  const questions = normalizeCloudQuiz(response.questions);
+  if (questions.length === 0) throw new Error('Cloud quiz returned no usable questions');
+
+  return { tier: 'cloud', questions };
 }

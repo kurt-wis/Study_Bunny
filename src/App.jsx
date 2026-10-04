@@ -12,7 +12,7 @@ import StudentReview from './pages/student/StudentReview.jsx';
 import StudentDashboard from './pages/student/StudentDashboard.jsx';
 import StudentVerify from './pages/student/StudentVerify.jsx';
 import StudentProfile from './pages/student/StudentProfile.jsx';
-import StudyRedirect from './pages/student/StudyRedirect.jsx';
+import StudentQuizPicker from './pages/student/StudentQuizPicker.jsx';
 
 export default function App() {
   return (
@@ -25,7 +25,7 @@ export default function App() {
           {/* Workspace: Home, Review, Quiz, Profile */}
           <Route path="/student" element={<StudentHome />} />
           <Route path="/student/review" element={<StudentReview />} />
-          <Route path="/student/quiz" element={<StudyRedirect mode="quiz" />} />
+          <Route path="/student/quiz" element={<StudentQuizPicker />} />
           <Route path="/student/profile" element={<StudentProfile />} />
 
           {/* Per-document screens */}

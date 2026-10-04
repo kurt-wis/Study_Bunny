@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { saveDocument, deleteDocument, setSetting } from '../../db/database.js';
 import { processDocument } from '../../utils/documentProcessor.js';
+import { isPptxFile, isLegacyPptFile } from '../../utils/pptxExtractor.js';
 import { loadOverview, formatDuration, relativeDay } from '../../services/home/overview.js';
 import { maybeRemind } from '../../utils/preferences.js';
 import { usePrefs } from '../../context/Prefs.jsx';
@@ -51,28 +52,33 @@ export default function StudentHome() {
 
   async function handleFile(file) {
     if (uploading) return;
-    if (!file || file.type !== 'application/pdf') {
-      setError('Please upload a PDF file.');
+    if (file && isLegacyPptFile(file)) {
+      setError('Old .ppt files cannot be read. In PowerPoint, choose Save As and pick .pptx or PDF, then upload that file.');
+      return;
+    }
+    if (!file || !(file.type === 'application/pdf' || isPptxFile(file))) {
+      setError('Please upload a PDF or PowerPoint (.pptx) file.');
       return;
     }
     setError(null);
     setUploading(true);
     setProgress('Starting…');
     try {
-      const { title, rawText, chunks, pages, lineText, cleanup } = await processDocument(file, (p) => {
+      const unit = isPptxFile(file) ? 'slide' : 'page';
+      const { title, rawText, chunks, pages, lineText, cleanup, extraction, sourceType } = await processDocument(file, (p) => {
         if (p.stage === 'extracting') {
-          setProgress(`Extracting page ${p.page} of ${p.pageCount}…`);
+          setProgress(`Extracting ${unit} ${p.page} of ${p.pageCount}…`);
         } else if (p.stage === 'chunking') {
           setProgress('Removing names, dates and page numbers…');
         } else if (p.stage === 'done') {
           setProgress('Saving…');
         }
       });
-      const docId = await saveDocument({ title, rawText, chunks, pages, lineText, cleanup, createdAt: new Date() });
+      const docId = await saveDocument({ title, rawText, chunks, pages, lineText, cleanup, extraction, sourceType, createdAt: new Date() });
       await setSetting('lastDocumentId', docId);
       navigate(`/student/document/${docId}`);
     } catch (err) {
-      setError(err.message || 'Failed to process PDF. Please try another file.');
+      setError(err.message || 'Failed to process this file. Please try another one.');
       setProgress(null);
     } finally {
       setUploading(false);
@@ -112,7 +118,7 @@ export default function StudentHome() {
   const goal = !hasSets
     ? {
         title: 'Start with your notes',
-        text: 'Upload a PDF and Study Bunny turns it into review cards and quizzes, right on this device.',
+        text: 'Upload a PDF or PowerPoint and Study Bunny turns it into review cards and quizzes, right on this device.',
         cta: <a href="#add-notes" className="sb-btn">Add your notes <Icon name="arrow" /></a>,
       }
     : due > 0
@@ -232,7 +238,7 @@ export default function StudentHome() {
               <div className="sb-card px-6 py-10 text-center">
                 <span className="sb-tile mx-auto mb-3" style={{ background: 'var(--sb-sky)', color: 'var(--sb-primary)' }}><Icon name="book" /></span>
                 <p className="font-bold">No documents yet</p>
-                <p className="sb-sub mt-1">Upload a PDF to get started</p>
+                <p className="sb-sub mt-1">Upload a PDF or PowerPoint to get started</p>
               </div>
             )}
           </section>
@@ -240,7 +246,7 @@ export default function StudentHome() {
           {/* Add notes */}
           <section id="add-notes" aria-labelledby="add-notes-title">
             <h2 id="add-notes-title" className="sb-h2 mt-3">Add notes</h2>
-            <p className="sb-sub mb-3.5">PDFs are read and stored on this device.</p>
+            <p className="sb-sub mb-3.5">PDF and PowerPoint (.pptx) files are read and stored on this device. Text inside pictures or scanned pages cannot be read.</p>
             <div
               className="rounded-[18px] px-6 py-8 text-center transition-colors"
               style={{
@@ -253,24 +259,24 @@ export default function StudentHome() {
             >
               {uploading ? (
                 <div>
-                  <LoadingSpinner message="Processing PDF..." />
+                  <LoadingSpinner message="Processing your file..." />
                   <p role="status" aria-live="polite" className="sb-sub mt-3">{progress}</p>
                 </div>
               ) : (
                 <>
-                  <p className="font-bold mb-1">Drop your PDF here</p>
+                  <p className="font-bold mb-1">Drop your PDF or PowerPoint here</p>
                   <p className="sb-sub mb-4">or choose a file from this device</p>
                   <button type="button" onClick={() => fileInputRef.current?.click()} className="sb-btn">
                     <Icon name="upload" />
-                    Upload PDF
+                    Upload file
                   </button>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="application/pdf"
+                    accept="application/pdf,.pdf,.pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     onChange={onFileInput}
                     className="hidden"
-                    aria-label="Choose PDF file"
+                    aria-label="Choose PDF or PowerPoint file"
                   />
                 </>
               )}

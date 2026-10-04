@@ -54,11 +54,17 @@ export default db;
 
 // ─── Documents ───────────────────────────────────────────────────────────────
 
-export async function saveDocument({ title, rawText, chunks, pages = [], lineText = null, cleanup = null, createdAt }) {
+export async function saveDocument({ title, rawText, chunks, pages = [], lineText = null, cleanup = null, extraction = null, sourceType = null, createdAt }) {
   // `lineText` is the same text with the handout's line breaks kept (used to
   // find "term - meaning" lines). Older documents do not have it.
   // `cleanup` records how many non-lesson lines were removed at upload.
-  return db.documents.add({ title, rawText, chunks, pages, lineText, cleanup, createdAt: createdAt ?? new Date() });
+  // `extraction` records how many pages had almost no readable text (scans,
+  // pictures of text); `sourceType` is 'pdf' or 'pptx'. Both are optional and
+  // only stored when known, so older callers and documents are unchanged.
+  const record = { title, rawText, chunks, pages, lineText, cleanup, createdAt: createdAt ?? new Date() };
+  if (extraction) record.extraction = extraction;
+  if (sourceType) record.sourceType = sourceType;
+  return db.documents.add(record);
 }
 
 /**

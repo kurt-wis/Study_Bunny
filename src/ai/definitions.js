@@ -34,7 +34,22 @@ function validTerm(term) {
   if (/^(?:it|this|that|these|those|they|there|he|she|we|you)\b/i.test(t)) return null;
   if (!/[A-Za-z]/.test(t)) return null;
   if (/^\d+$/.test(t)) return null;
+  // "Jose Rizal achieved - academic excellence" is a sentence with a dash in
+  // it, not a term and its meaning: a real term does not end in a verb or a
+  // joining word.
+  if (words.length > 1 && endsLikeSentence(words[words.length - 1])) return null;
   return t;
+}
+
+const TRAILING_WORDS = new Set(['is', 'are', 'was', 'were', 'be', 'been', 'being', 'has', 'have', 'had', 'do', 'does', 'did', 'can', 'could', 'will', 'would', 'shall', 'should', 'may', 'might', 'must', 'of', 'to', 'in', 'on', 'at', 'by', 'for', 'from', 'with', 'into', 'and', 'or', 'but', 'the', 'a', 'an', 'that', 'which', 'who', 'whose', 'when', 'where', 'because', 'became', 'made', 'wrote', 'led', 'won', 'said', 'gave', 'took', 'went', 'began', 'found', 'built', 'fought', 'also', 'then']);
+const ED_NOUNS = /^(?:hundred|kindred|sacred|hatred|shed|breed|creed|greed|speed|steed|tweed)$/;
+
+/** Whether a term's last word shows it is a cut-off sentence ("… achieved", "… was"). */
+function endsLikeSentence(word) {
+  const w = String(word ?? '').replace(/[^A-Za-z']/g, '');
+  if (!w || w !== w.toLowerCase()) return false; // capitalised words are names or headings
+  if (TRAILING_WORDS.has(w)) return true;
+  return w.length >= 6 && /ed$/.test(w) && !/eed$/.test(w) && !ED_NOUNS.test(w);
 }
 
 function validDefinition(definition) {

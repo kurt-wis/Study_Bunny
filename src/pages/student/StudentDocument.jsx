@@ -11,6 +11,7 @@ import AudioSummary from '../../components/AudioSummary.jsx';
 import StudyTips from '../../components/StudyTips.jsx';
 import LoadingSpinner from '../../components/shared/LoadingSpinner.jsx';
 import ErrorMessage from '../../components/shared/ErrorMessage.jsx';
+import { isMostlyImages } from '../../utils/extractionQuality.js';
 
 /** Plain names for what the upload clean-up removed. */
 const CLEANUP_LABELS = {
@@ -137,6 +138,18 @@ export default function StudentDocument() {
       </PageHeader>
 
       <main key={activeTab} className="max-w-[816px] mx-auto px-4 sm:px-8 py-5 sb-enter">
+        {/* Scanned pages and pictures of text cannot be read: say so up front. */}
+        {isMostlyImages(doc?.extraction) && (
+          <div className="flex items-start gap-2.5 mb-4 p-3.5 rounded-[14px] text-sm" style={{ background: 'var(--sb-amber-bg)', color: 'var(--sb-amber-ink)' }} role="note">
+            <Icon name="alert" size={18} style={{ marginTop: 1, flex: 'none' }} />
+            <span>
+              <span className="font-bold">This file is mostly pictures.</span>{' '}
+              {doc.extraction.lowTextPages} of {doc.extraction.pageCount} {doc.sourceType === 'pptx' ? 'slides' : 'pages'} had little or no text Study Bunny could read,
+              so the summary, cards and quizzes may be incomplete or oddly worded. Text inside images and scanned pages is not read.
+              A typed version of the notes works best; you can also fix cards in the Cards tab.
+            </span>
+          </div>
+        )}
         <button onClick={() => navigate(`/student/document/${docId}/verify`)} className="sb-btn-ghost w-full mb-4">
           Check notes against a reference
         </button>

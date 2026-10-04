@@ -49,6 +49,14 @@ export default function StudentQuiz() {
   const technique = searchParams.get('technique');
   const pomodoroEnabled = technique === 'pomodoro';
 
+  // Optional quiz scope chosen on the quiz picker: more modules to mix in
+  // (`docs=1,2`) or only some pages of this module (`from` / `to`).
+  const docsParam = searchParams.get('docs') ?? '';
+  const fromParam = searchParams.get('from');
+  const toParam = searchParams.get('to');
+  const extraDocIds = docsParam.split(',').map(n => parseInt(n, 10)).filter(n => Number.isInteger(n) && n !== docId);
+  const pageRange = fromParam || toParam ? { from: fromParam, to: toParam } : null;
+
   const [quiz, setQuiz] = useState(null);
   const [docTitle, setDocTitle] = useState('');
   const [loading, setLoading] = useState(true);
@@ -66,6 +74,7 @@ export default function StudentQuiz() {
   const [habit, setHabit] = useState(undefined); // undefined = loading, null = not asked yet
   const [habitChoice, setHabitChoice] = useState(null);
   const resultHeadingRef = useRef(null);
+  const topicDocRef = useRef({}); // topic → the module it was asked from (combined quizzes)
   const habitSettingKey = `studyHabit:${docId}`;
   const showSurvey = habit === null;
 
@@ -76,7 +85,7 @@ export default function StudentQuiz() {
     getDocument(docId).then(d => setDocTitle(d?.title ?? '')).catch(() => {});
     if (!Number.isNaN(docId)) setSetting('lastDocumentId', docId).catch(() => {});
     getSetting(habitSettingKey, null).then(saved => setHabit(saved ?? null)).catch(() => setHabit('skipped'));
-  }, [docId]);
+  }, [docId, docsParam, fromParam, toParam]);
 
   /** Save the survey answer (or "skipped") so it is asked only once per document. */
   async function answerSurvey(value) {
@@ -100,7 +109,12 @@ export default function StudentQuiz() {
     setLoading(true);
     setError(null);
     try {
-      const result = await generateQuiz(docId);
+      const result = await generateQuiz(docId, { documentIds: extraDocIds, pageRange });
+      if (!result.questions || result.questions.length === 0) {
+        setQuiz(null);
+        setError('No questions could be made from this part of your notes. Try a bigger part or another module.');
+        return;
+      }
       setQuiz(result);
     } catch (err) {
       setError(err.message || 'Failed to generate quiz.');
@@ -165,7 +179,9 @@ export default function StudentQuiz() {
 
   async function finishQuiz() {
     const questions = quiz.questions;
-    const ks = await getKnowledgeState(docId);
+    // Each question updates the module it came from (combined quizzes mix modules).
+    const stateByDoc = { [docId]: await getKnowledgeState(docId) };
+    const topicDoc = {};
 
     let finalScore = 0;
     // Track the per-topic mastery after this quiz so we can surface weak topics
@@ -179,6 +195,10 @@ export default function StudentQuiz() {
 
       // Update BKT mastery for this topic
       const topic = q.topic || 'general';
+      const targetDoc = Number.isInteger(q.documentId) ? q.documentId : docId;
+      if (!stateByDoc[targetDoc]) stateByDoc[targetDoc] = await getKnowledgeState(targetDoc);
+      const ks = stateByDoc[targetDoc];
+      topicDoc[topic] = targetDoc;
       const prior = topic in updatedMastery
         ? updatedMastery[topic]
         : (typeof ks[topic] === 'object'
@@ -189,8 +209,9 @@ export default function StudentQuiz() {
         correct
       );
       updatedMastery[topic] = newMastery;
-      await updateKnowledgeState(docId, topic, newMastery);
+      await updateKnowledgeState(targetDoc, topic, newMastery);
     }
+    topicDocRef.current = topicDoc;
 
     setScore(finalScore);
     if (quiz.quizId) {
@@ -387,7 +408,7 @@ export default function StudentQuiz() {
               {weakTopics.slice(0, 5).map(topic => (
                 <Link
                   key={topic}
-                  to={`/student/document/${docId}/review?technique=feynman&topic=${encodeURIComponent(topic)}`}
+                  to={`/student/document/${topicDocRef.current[topic] ?? docId}/review?technique=feynman&topic=${encodeURIComponent(topic)}`}
                   className="sb-btn-ghost"
                 >
                   Explain “{topic}”
@@ -409,7 +430,12 @@ export default function StudentQuiz() {
 
   const answer = answers[currentIndex];
   const answeredCorrectly = submitted && currentQ ? isCorrect(currentQ, answer) : false;
-  const options = currentQ?.options ?? ['True', 'False'];
+  const options = Array.isArray(currentQ?.options) && currentQ.options.length > 0 ? currentQ.options : ['True', 'False'];
+  // Anything that is not a typed answer is answered by tapping an option.
+  const isTyped = currentQ?.type === 'fill_in_blank';
+  const isTrueFalse = options.length === 2 && options.every(o => /^(?:true|false)$/i.test(o));
+  const typeLabel = isTyped ? 'Fill in the blank' : isTrueFalse ? 'True or false' : 'Multiple choice';
+  const moduleCount = quiz?.documentIds?.length ?? 1;
   const progressPct = totalQ > 0 ? ((currentIndex + (submitted ? 1 : 0)) / totalQ) * 100 : 0;
 
   return (
@@ -417,7 +443,10 @@ export default function StudentQuiz() {
       <header className="flex items-start gap-1">
         {backButton}
         <div className="flex-1 min-w-0">
-          <p className="sb-eyebrow truncate">Quick quiz{docTitle ? ` · ${docTitle}` : ''}</p>
+          <p className="sb-eyebrow truncate">
+            Quick quiz{moduleCount > 1 ? ` · ${moduleCount} modules` : docTitle ? ` · ${docTitle}` : ''}
+            {moduleCount === 1 && pageRange ? ` · pages ${fromParam || 1}${toParam ? `–${toParam}` : '+'}` : ''}
+          </p>
           <h1 className="sb-title mt-1.5">Test your understanding</h1>
         </div>
         {/* Optional Pomodoro overlay toggle (Req 2.2, 2.6). Only when the
@@ -457,7 +486,7 @@ export default function StudentQuiz() {
                 {currentQ.difficulty === 'review' && (
                   <span className="sb-chip" style={{ background: 'var(--sb-amber-bg)', color: 'var(--sb-amber-ink)' }}>Review topic</span>
                 )}
-                <span className="sb-chip">{currentQ.type === 'fill_in_blank' ? 'Fill in the blank' : 'True or false'}</span>
+                <span className="sb-chip">{typeLabel}</span>
               </span>
             </div>
 
@@ -467,7 +496,7 @@ export default function StudentQuiz() {
               </legend>
 
               {/* Choice options: tapping one answers immediately */}
-              {currentQ.type === 'true_false' && (
+              {!isTyped && (
                 <div className="flex flex-col gap-2.5">
                   {options.map((option, i) => {
                     const selected = answer === option;
@@ -498,7 +527,7 @@ export default function StudentQuiz() {
               )}
 
               {/* Fill-in-blank input */}
-              {currentQ.type === 'fill_in_blank' && !submitted && (
+              {isTyped && !submitted && (
                 <div className="flex flex-wrap gap-3">
                   <label htmlFor="fill-in-blank-answer" className="sr-only">Your answer</label>
                   <input
@@ -516,7 +545,7 @@ export default function StudentQuiz() {
                   </button>
                 </div>
               )}
-              {currentQ.type === 'fill_in_blank' && submitted && (
+              {isTyped && submitted && (
                 <div className="sb-option" data-state={answeredCorrectly ? 'correct' : 'wrong'}>
                   <span className="sb-letter"><Icon name={answeredCorrectly ? 'check' : 'x'} size={16} /></span>
                   <span className="flex-1"><span className="sr-only">Your answer: </span>{answer}</span>
@@ -540,7 +569,7 @@ export default function StudentQuiz() {
                 </span>
                 <div className="min-w-0">
                   <div className="font-bold text-sm">{answeredCorrectly ? 'That’s correct' : 'Not quite — keep learning'}</div>
-                  {!answeredCorrectly && currentQ.type === 'fill_in_blank' && (
+                  {!answeredCorrectly && isTyped && (
                     <div className="text-sm sb-body">Answer: <span className="font-bold">{currentQ.correct_answer}</span></div>
                   )}
                   {currentQ.explanation && <div className="text-xs sb-body leading-relaxed mt-0.5">{currentQ.explanation}</div>}

@@ -36,14 +36,14 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', req => { if (!req.url().startsWith(origin)) external.push(req.url()); });
   await page.goto(`${origin}/student`);
-  await page.getByRole('button', { name: 'Upload PDF', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Upload file', exact: true }).waitFor();
   await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
   await page.reload(); // Prompt-mode workers control new visits, not a live first-load session.
   assert.equal(await page.evaluate(() => Boolean(navigator.serviceWorker.controller)), true);
   // Offline upload exercises PDF.js and its locally precached worker.
   await context.setOffline(true);
   const pdf = fixturePdf('Water boils at 100 degrees Celsius. Plants use sunlight for photosynthesis.');
-  await page.getByLabel('Choose PDF file').setInputFiles({ name: 'test-notes.pdf', mimeType: 'application/pdf', buffer: pdf });
+  await page.getByLabel('Choose PDF or PowerPoint file').setInputFiles({ name: 'test-notes.pdf', mimeType: 'application/pdf', buffer: pdf });
   await page.getByRole('button', { name: 'Check notes against a reference' }).click();
   await page.getByRole('heading', { name: 'Check my notes', exact: true }).waitFor();
   await page.getByLabel('Notes excerpt').fill('Name: Ana Santos\nEmail: ana@example.org\nWater boils at 100 degrees Celsius. Plants are made of cheese.');

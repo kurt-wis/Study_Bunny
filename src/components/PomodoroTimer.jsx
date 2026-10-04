@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import Icon from './Icon.jsx';
 import usePomodoro, { PHASES } from '../hooks/usePomodoro.js';
 
@@ -81,7 +82,7 @@ const BTN_BASE =
   'focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500 ' +
   'disabled:opacity-40 disabled:cursor-not-allowed';
 
-export default function PomodoroTimer({ config, persist = true, className = '' }) {
+export default function PomodoroTimer({ config, persist = true, className = '', floating = true }) {
   const {
     phase,
     remainingMs,
@@ -162,6 +163,23 @@ export default function PomodoroTimer({ config, persist = true, className = '' }
     };
   }, [isFocusPermissionGranted, running]);
 
+  // ── Mini floating clock ───────────────────────────────────────────────────
+  // When the timer scrolls out of view, a small clock stays in the corner so
+  // the student can track the time without scrolling back up. Browsers without
+  // IntersectionObserver simply never show it.
+  const sectionRef = useRef(null);
+  const [offscreen, setOffscreen] = React.useState(false);
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!floating || !el || typeof IntersectionObserver === 'undefined') return undefined;
+    const observer = new IntersectionObserver(entries => {
+      const entry = entries[entries.length - 1];
+      if (entry) setOffscreen(!entry.isIntersecting);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [floating]);
+
   const toggleFocusMode = () => {
     // Revocable: flip the persisted permission (Req 2.4, 2.5).
     setFocusPermission(!isFocusPermissionGranted);
@@ -174,9 +192,24 @@ export default function PomodoroTimer({ config, persist = true, className = '' }
 
   return (
     <section
+      ref={sectionRef}
       className={`bg-white border border-gray-200 rounded-2xl p-5 flex flex-col items-center gap-4 ${className}`}
       aria-label="Pomodoro timer"
     >
+      {floating && offscreen && !isIdle && typeof document !== 'undefined' && createPortal(
+        <button
+          type="button"
+          onClick={() => sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+          aria-label={`${phaseLabel}${running ? '' : ', paused'}. Show the focus timer`}
+          className="fixed top-3 right-3 z-30 inline-flex items-center gap-2 min-h-[48px] px-3.5 rounded-full text-sm font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500"
+          style={{ background: 'var(--sb-surface)', color: 'var(--sb-ink)', border: '1px solid var(--sb-line)', boxShadow: '0 8px 24px rgba(27,43,68,0.18)' }}
+        >
+          <span aria-hidden="true" className={PHASE_RING[phase] ?? ''}>{phaseIcon}</span>
+          <span className="font-mono tabular-nums" aria-hidden="true">{timeText}</span>
+          <span className="text-xs font-normal" aria-hidden="true" style={{ color: 'var(--sb-muted)' }}>{running ? phaseLabel : 'Paused'}</span>
+        </button>,
+        document.body,
+      )}
       {/* Phase + cycle count */}
       <div className="flex flex-col items-center gap-1">
         <span

@@ -7,6 +7,8 @@
 // PDF.js worker must be configured before use
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { cleanModuleLines } from './cleanModule.js';
+import { measureExtraction } from './extractionQuality.js';
+import { isPptxFile, extractTextFromPPTX } from './pptxExtractor.js';
 let pdfjsLib = null;
 
 async function getPdfjsLib() {
@@ -47,6 +49,8 @@ export async function extractTextFromPDF(file, onProgress) {
       if (characterCount > 1000000) throw new Error('This PDF contains too much text. Split it into smaller files.');
       onProgress?.({ stage: 'extracting', page: pageNum, pageCount });
     }
+    // How many pages had almost no text (scanned pages, pictures of text).
+    const extraction = measureExtraction(linePages);
     // Remove what is not the lesson (name/date/score fields, page numbers,
     // repeated headers and footers) before anything is saved or shown.
     const cleaned = cleanModuleLines(linePages);
@@ -61,6 +65,8 @@ export async function extractTextFromPDF(file, onProgress) {
       pages,
       lineText: cleaned.pages.map(lines => lines.join('\n')).join('\n\n'),
       cleanup: { removed: cleaned.removed, kinds: cleaned.kinds },
+      extraction,
+      sourceType: 'pdf',
     };
   } finally {
     await loadingTask.destroy();
@@ -172,13 +178,16 @@ function estimateTokens(text) {
  *   Optional progress callback. Receives per-page `{ stage: 'extracting', page, pageCount }`
  *   events, then `{ stage: 'chunking' }` and finally `{ stage: 'done' }`.
  *   Omitting it preserves the original behavior exactly.
- * @returns {Promise<{ title: string, rawText: string, chunks: string[], pages: string[] }>}
+ * @returns {Promise<{ title: string, rawText: string, chunks: string[], pages: string[], extraction: { pageCount: number, lowTextPages: number }, sourceType: 'pdf'|'pptx' }>}
  */
 export async function processDocument(file, onProgress) {
-  const { rawText, pages, lineText, cleanup } = await extractTextFromPDF(file, onProgress);
+  // PowerPoint files are read by their own extractor.
+  const { rawText, pages, lineText, cleanup, extraction, sourceType } = isPptxFile(file)
+    ? await extractTextFromPPTX(file, onProgress)
+    : await extractTextFromPDF(file, onProgress);
   onProgress?.({ stage: 'chunking' });
   const chunks = chunkText(rawText);
-  const title = file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ');
+  const title = file.name.replace(/\.(?:pdf|pptx)$/i, '').replace(/[-_]/g, ' ');
   onProgress?.({ stage: 'done' });
-  return { title, rawText, chunks, pages, lineText, cleanup };
+  return { title, rawText, chunks, pages, lineText, cleanup, extraction, sourceType };
 }
