@@ -1,20 +1,19 @@
 import React from 'react';
+import Icon from '../Icon.jsx';
 
 export default function ErrorMessage({ message, onRetry }) {
   return (
     <div
       role="alert"
-      className="bg-red-50 border border-red-200 rounded-xl p-4 flex flex-col gap-2"
+      className="rounded-[14px] p-4 flex flex-col gap-2 sb-shake"
+      style={{ background: 'var(--sb-coral-bg)', color: 'var(--sb-coral-ink)' }}
     >
-      <div className="flex items-start gap-2">
-        <span className="text-red-500 text-lg" aria-hidden="true">⚠️</span>
-        <p className="text-red-700 text-sm">{message}</p>
+      <div className="flex items-start gap-2.5">
+        <Icon name="alert" size={18} style={{ marginTop: 1 }} />
+        <p className="text-sm">{message}</p>
       </div>
       {onRetry && (
-        <button
-          onClick={onRetry}
-          className="self-start text-red-600 text-sm font-medium underline hover:no-underline"
-        >
+        <button onClick={onRetry} className="self-start text-sm font-bold underline hover:no-underline" style={{ color: 'inherit' }}>
           Try again
         </button>
       )}

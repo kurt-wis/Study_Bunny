@@ -16,7 +16,7 @@ import {
   parseModelJson,
   validateSummarize as validateSummarizeOutput,
 } from '../lib/responseValidators.js';
-import { invokeModel as realInvokeModel } from '../lib/bedrockClient.js';
+import { invokeModel as realInvokeModel } from '../lib/modelClient.js';
 import { enforceQuota } from '../lib/quota.js';
 
 /**
@@ -63,5 +63,5 @@ export function makeHandler({ invokeModel }) {
   };
 }
 
-/** Wired handler for the Lambda entry point. */
+/** Wired handler for the deployed function. */
 export const handler = makeHandler({ invokeModel: realInvokeModel });

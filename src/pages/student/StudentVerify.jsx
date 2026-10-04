@@ -1,3 +1,4 @@
+import PageHeader from '../../components/layout/PageHeader.jsx';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getDocument, getVerificationReports, saveVerificationReport } from '../../db/database.js';
@@ -40,6 +41,7 @@ export default function StudentVerify() {
   const [notes, setNotes] = useState('');
   const [reference, setReference] = useState('');
   const [referenceTitle, setReferenceTitle] = useState('Pasted reference');
+  const [referenceFile, setReferenceFile] = useState(null); // { name, pages, edited } of the uploaded reference PDF
   const [custom, setCustom] = useState('');
   const [reviewed, setReviewed] = useState(false);
   const [useCloud, setUseCloud] = useState(false);
@@ -74,13 +76,14 @@ export default function StudentVerify() {
     try {
       const parsed = await processDocument(file, p => setProgress(p.stage === 'extracting' ? `Reading reference page ${p.page} of ${p.pageCount}…` : 'Preparing reference…'));
       setReference(parsed.rawText); setReferenceTitle(parsed.title);
+      setReferenceFile({ name: file.name, pages: parsed.pages?.length ?? 0, edited: false });
     } catch (e) { setError(e.message || 'Could not read reference PDF.'); }
     finally { setBusy(false); setProgress(''); }
   }
   async function check() {
     setBusy(true); setError(''); setResult(null); setProgress(useCloud ? 'Checking claims against your reference…' : 'Comparing statements locally…');
     try {
-      if (useCloud && !await cloudEnabled()) throw new Error('Enable Cloud AI and sign in above before AI checking.');
+      if (useCloud && !await cloudEnabled()) throw new Error('Turn on Cloud AI and enter your access code in the Optional Cloud AI box above before AI checking. If that box says Cloud AI is not available, this site has not been set up for it yet: use Compare offline instead.');
       const report = { ...await verifyNotes({ notes, reference, customTerms: terms, useCloud, reviewed }), referenceTitle };
       setResult(report);
       try { await saveVerificationReport(docId, report); setHistory(await getVerificationReports(docId)); }
@@ -91,11 +94,8 @@ export default function StudentVerify() {
 
   if (loading) return <p className="p-6" role="status">Loading notes…</p>;
   return <div className="min-h-screen bg-gray-50">
-    <header className="bg-white border-b border-gray-200"><div className="max-w-2xl mx-auto px-4 py-3 flex gap-3 items-center">
-      <button className="min-h-[48px] min-w-[48px] text-indigo-700" aria-label="Back to document" onClick={() => navigate(`/student/document/${docId}`)}>‹</button>
-      <div className="min-w-0"><h1 className="font-bold text-xl">Check my notes</h1><p className="text-sm text-gray-500 truncate">{doc?.title}</p></div>
-    </div></header>
-    <main className="max-w-2xl mx-auto px-4 py-6 space-y-5">
+    <PageHeader eyebrow={doc?.title} title="Check my notes" onBack={() => navigate(`/student/document/${docId}`)} backLabel="Back to document" />
+    <main className="max-w-[816px] mx-auto px-4 sm:px-8 py-5 space-y-5 sb-enter">
       <p className="text-sm text-gray-600">Compare academic statements with a textbook excerpt or teacher-approved reference. Review the evidence before changing your notes. Checking uses the first 12 detected statements per run; shorten or replace the excerpt to check the rest.</p>
       <CloudAccessPanel />
       <section className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
@@ -106,8 +106,14 @@ export default function StudentVerify() {
         <label className="block font-semibold text-sm">Reference PDF
           <input type="file" accept="application/pdf,.pdf" disabled={busy} className="block mt-2 w-full min-h-[48px] text-sm font-normal" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; uploadReference(file); }} />
         </label>
+        {/* The picker is reset after reading, so say here which file is loaded. */}
+        <p role="status" className="-mt-3 text-xs" style={{ color: referenceFile ? 'var(--sb-mint-ink)' : 'var(--sb-muted)' }}>
+          {referenceFile
+            ? `Loaded: ${referenceFile.name}${referenceFile.pages ? ` · ${referenceFile.pages} page${referenceFile.pages === 1 ? '' : 's'}` : ''}${referenceFile.edited ? ' · edited below' : ''}. Its text is in the box below.`
+            : 'No reference PDF loaded yet. You can also paste text below.'}
+        </p>
         <label className="block font-semibold text-sm">Reference text or excerpt
-          <textarea rows={7} className="mt-2 w-full border border-gray-300 rounded-xl p-3 text-sm font-normal" value={reference} disabled={busy} onChange={e => { setReference(e.target.value); setReferenceTitle('Edited reference'); }} placeholder="Paste a trusted source or upload a text-based PDF above." />
+          <textarea rows={7} className="mt-2 w-full border border-gray-300 rounded-xl p-3 text-sm font-normal" value={reference} disabled={busy} onChange={e => { setReference(e.target.value); setReferenceTitle('Edited reference'); setReferenceFile(f => (e.target.value.trim() ? (f ? { ...f, edited: true } : f) : null)); }} placeholder="Paste a trusted source or upload a text-based PDF above." />
           <span className="text-xs font-normal text-gray-600">{reference.length.toLocaleString()} / {MAX_REFERENCE_CHARS.toLocaleString()} characters. Reference uploads stay on this device.</span>
         </label>
       </section>

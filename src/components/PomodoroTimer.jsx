@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import Icon from './Icon.jsx';
 import usePomodoro, { PHASES } from '../hooks/usePomodoro.js';
 
 /**
@@ -36,10 +37,10 @@ const PHASE_LABELS = {
 };
 
 const PHASE_ICONS = {
-  [PHASES.IDLE]: '🐰',
-  [PHASES.FOCUS]: '📚',
-  [PHASES.SHORT_BREAK]: '☕',
-  [PHASES.LONG_BREAK]: '🌙',
+  [PHASES.IDLE]: <Icon name="timer" />,
+  [PHASES.FOCUS]: <Icon name="book" />,
+  [PHASES.SHORT_BREAK]: <Icon name="clock" />,
+  [PHASES.LONG_BREAK]: <Icon name="moon" />,
 };
 
 const PHASE_RING = {
@@ -167,7 +168,7 @@ export default function PomodoroTimer({ config, persist = true, className = '' }
   };
 
   const phaseLabel = PHASE_LABELS[phase] ?? 'Timer';
-  const phaseIcon = PHASE_ICONS[phase] ?? '⏱️';
+  const phaseIcon = PHASE_ICONS[phase] ?? <Icon name="timer" />;
   const timeText = formatRemaining(remainingMs);
   const isIdle = phase === PHASES.IDLE;
 
@@ -260,7 +261,7 @@ export default function PomodoroTimer({ config, persist = true, className = '' }
             : 'Focus mode off. Turn on to keep the screen awake while studying.'
         }
       >
-        <span aria-hidden="true">{isFocusPermissionGranted ? '🔒' : '🔓'}</span>
+        <Icon name="shield" size={16} />
         Focus mode: {isFocusPermissionGranted ? 'On' : 'Off'}
       </button>
 

@@ -154,7 +154,7 @@ export default function LearningCurve({ points = [] }) {
       </div>
       {inflection && (
         <p className="mt-1 text-xs text-amber-700">
-          🔸 Dashed line marks attempt {inflection.attempt}, where you switched from{' '}
+          Dashed line marks attempt {inflection.attempt}, where you switched from{' '}
           {seriesLabelFor(inflection.from)} to {seriesLabelFor(inflection.to)}.
         </p>
       )}

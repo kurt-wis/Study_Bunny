@@ -11,27 +11,11 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            cloud-api/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci
-      - run: npm ci --prefix cloud-api
       - run: npm test
       - run: npm run build
       - run: npm run check:pwa
       - run: npm audit
-      - run: npm audit --prefix cloud-api
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
-  infrastructure:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install cfn-lint==1.57.1
-      - run: cfn-lint cloud-api/template.yaml --regions ap-southeast-1
-        env:
-          AWS_DEFAULT_REGION: ap-southeast-1
-          AWS_EC2_METADATA_DISABLED: 'true'

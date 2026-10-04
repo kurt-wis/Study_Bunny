@@ -12,7 +12,7 @@ Every AI-powered feature resolves its tier **per invocation** and shows the user
 
 | Tier | Name | Powered by | Requires |
 |------|------|-----------|----------|
-| Tier 2 | **Cloud AI** | Configured in-region AWS Bedrock model via Lambda | Opt-in + Cognito sign-in + internet + healthy JSON `/api/health` |
+| Tier 2 | **Cloud AI** | A hosted AI model (Gemini, Groq, OpenAI or Claude), called from the app's own `/api` server functions | Opt-in + access code + internet + healthy JSON `/api/health` |
 | Tier 1 | **On-device AI** | On-device small language model (stretch goal; not registered in MVP) | Ready edge provider |
 | Tier 3 | **Offline mode** | Pure-JS deterministic algorithms (RAKE, TF-IDF, BKT) | Nothing — always available |
 
@@ -42,7 +42,7 @@ Every AI-powered feature resolves its tier **per invocation** and shows the user
   add missed details manually and inspect redacted previews. Detection isn't a
   guarantee of anonymity.
 - Compare up to 12 statements with supported/conflicting/insufficient-evidence
-  statuses. AI needs explicit preview review, opt-in and sign-in. Definitive AI
+  statuses. AI needs explicit preview review, opt-in and the access code. Definitive AI
   results require exact quotes from supplied references; source quality and
   interpretation still require human judgment.
 - Offline mode recognizes matching complete-sentence wording only. Other
@@ -109,12 +109,12 @@ The thin layer every feature builds on (owned by the Platform Foundation spec).
 - All student data stays **on-device**. No accounts, no login, no sync.
 
 ### API transport
-- `apiHealthCheck()` + `apiPost()` against a build-time `VITE_API_BASE_URL`.
-- **No credentials on the client.** The base URL is configuration, not a secret.
+- `apiHealthCheck()` + `apiPost()` against the app's own `/api` routes (optional `VITE_API_BASE_URL` for a separate origin).
+- **No provider key on the client.** The AI service key lives only in server environment variables. The student's access code is sent with each AI request.
 
 ### Cloud backend (optional Tier 2 enhancement)
-- Node.js 24 Lambda handlers behind authenticated API Gateway invoking the explicitly configured in-region Anthropic Bedrock model.
-- Endpoints used by Student Mode: `/api/health`, `/api/summarize`, `/api/quiz`, `/api/chat`.
+- Vercel serverless functions (`/api/*.js`) wrapping the handlers in `cloud-api/`, calling the AI service set on the server (Gemini, Groq, OpenAI, OpenRouter or Anthropic). Guarded by a shared access code, a same-origin check and a daily limit per device.
+- Endpoints used by Student Mode: `/api/health`, `/api/summarize`, `/api/quiz`, `/api/chat`, `/api/feynman`, `/api/analyze-technique`, `/api/verify-notes`.
 - Request validation + content-free logging; no PDF bytes, filenames, or identities accepted.
 - The app is fully functional **without** this backend — it just unlocks the richer cloud tier.
 
@@ -137,18 +137,32 @@ The thin layer every feature builds on (owned by the Platform Foundation spec).
 
 ---
 
+## 10. Workspace, Listening and Study Tips
+
+- **Workspace shell**: Home / Review / Quiz / Profile (side menu on wide screens, bottom tabs on phones).
+- **Home**: daily goal, streak, study time, topics mastered, today's plan, learning curve.
+- **Profile**: name, totals, reminders, sound effects, dark appearance, data export, clear data, Cloud AI consent.
+- **Review flow**: technique first (or skip to flashcards), then module/handout; flashcards rated Again / Hard / Good / Easy.
+- **Technique suggestions** after a weak review and on the learning-curve page.
+- **Short structured summaries**: three key points, up to five key ideas, a study order.
+- **Feynman comparison**: the student's explanation beside the notes, with covered and missing ideas marked.
+- **Listen to this lesson**: read-aloud script with a mini-quiz, using the device's built-in voice (offline).
+- **Study tips**: up to four personal tips per lesson (offline).
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Framework | React 18 + Vite |
-| Styling | Tailwind CSS 3 |
+| Styling | Tailwind CSS 4 + Study Bunny design tokens (`src/index.css`) |
 | Local DB | Dexie.js (IndexedDB) |
 | Routing | React Router v6 |
 | PDF | PDF.js (`pdfjs-dist`) |
 | PWA | vite-plugin-pwa (Workbox) |
 | Offline AI | Pure-JS RAKE, TF-IDF, BKT (zero dependencies) |
-| Cloud AI (optional) | Cognito + AWS Lambda + API Gateway + configured Bedrock model + DynamoDB quota |
+| Cloud AI (optional) | Vercel functions + a hosted AI model (Gemini, Groq, OpenAI or Claude) + access code + daily limit (optional Upstash Redis) |
 
 ---
 

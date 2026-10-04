@@ -1,26 +1,39 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { enforceQuota } from '../src/lib/quota.js';
-const event = { requestContext: { authorizer: { jwt: { claims: { sub: 'test-user' } } } } };
-const env = { QUOTA_TABLE: 'test-table', DAILY_REQUEST_LIMIT: '20' };
+const event = { clientId: 'client-a' };
+const env = { DAILY_REQUEST_LIMIT: '2' };
 
-test('quota requires an authenticated JWT subject before any cloud operation', async () => {
+test('quota is skipped for direct handler calls with no client id', async () => {
   let calls = 0;
-  await assert.rejects(enforceQuota({}, { env, send: async () => calls++ }), e => e.status === 401);
+  await enforceQuota({}, { env, increment: async () => ++calls });
   assert.equal(calls, 0);
 });
-test('quota atomically shares a UTC daily counter with expiring rows', async () => {
-  let command;
+test('quota counts per client per UTC day with a two-day expiry', async () => {
+  let seen;
   const now = new Date('2026-10-04T23:59:00Z');
-  await enforceQuota(event, { env, now, send: async input => { command = input; } });
-  assert.equal(command.Key.pk.S, 'test-user:2026-10-04');
-  assert.equal(command.ExpressionAttributeValues[':limit'].N, '20');
-  assert.match(command.ConditionExpression, /requests < :limit/);
-  assert.match(command.UpdateExpression, /ADD requests :one/);
-  assert.equal(Number(command.ExpressionAttributeValues[':ttl'].N), now.getTime() / 1000 + 172800);
+  await enforceQuota(event, { env, now, increment: async (key, ttl) => { seen = { key, ttl }; return 1; } });
+  assert.deepEqual(seen, { key: 'sb:quota:client-a:2026-10-04', ttl: 172800 });
 });
-test('quota exhaustion is 429 and infrastructure failure does not bypass allowance', async () => {
-  await assert.rejects(enforceQuota(event, { env, send: async () => { throw Object.assign(new Error('full'), { name: 'ConditionalCheckFailedException' }); } }), e => e.status === 429);
-  await assert.rejects(enforceQuota(event, { env, send: async () => { throw new Error('unavailable'); } }), /unavailable/);
-  await assert.rejects(enforceQuota(event, { env: { ...env, DAILY_REQUEST_LIMIT: '-1' }, send: async () => {} }), /configuration/);
+test('quota exhaustion is 429 and store failure does not bypass the allowance', async () => {
+  await enforceQuota(event, { env, increment: async () => 2 });
+  await assert.rejects(enforceQuota(event, { env, increment: async () => 3 }), e => e.status === 429);
+  await assert.rejects(enforceQuota(event, { env, increment: async () => { throw new Error('unavailable'); } }), /unavailable/);
+  await assert.rejects(enforceQuota(event, { env: { DAILY_REQUEST_LIMIT: '-1' }, increment: async () => 1 }), /configuration/);
+});
+test('in-memory fallback enforces the limit within one instance', async () => {
+  const e = { clientId: `mem-${Math.random()}` };
+  await enforceQuota(e, { env });
+  await enforceQuota(e, { env });
+  await assert.rejects(enforceQuota(e, { env }), err => err.status === 429);
+});
+test('Upstash store is used when configured and its errors fail closed', async () => {
+  const upstash = { ...env, UPSTASH_REDIS_REST_URL: 'https://example.invalid/', UPSTASH_REDIS_REST_TOKEN: 't' };
+  let request;
+  const ok = async (url, init) => { request = { url, body: JSON.parse(init.body), auth: init.headers.Authorization }; return { ok: true, json: async () => [{ result: 1 }, { result: 1 }] }; };
+  await enforceQuota(event, { env: upstash, now: new Date('2026-10-04T00:00:00Z'), fetchImpl: ok });
+  assert.equal(request.url, 'https://example.invalid/pipeline');
+  assert.equal(request.auth, 'Bearer t');
+  assert.deepEqual(request.body[0], ['INCR', 'sb:quota:client-a:2026-10-04']);
+  await assert.rejects(enforceQuota(event, { env: upstash, fetchImpl: async () => ({ ok: false }) }), /unavailable/);
 });

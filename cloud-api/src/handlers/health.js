@@ -35,5 +35,5 @@ export function makeHandler() {
   };
 }
 
-/** Wired handler for the Lambda entry point. */
+/** Wired handler for the deployed function. */
 export const handler = makeHandler();

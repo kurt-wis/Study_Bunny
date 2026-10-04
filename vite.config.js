@@ -8,13 +8,13 @@ export default defineConfig({
     VitePWA({
       // Activate updates when the app next opens, without reloading a live quiz.
       registerType: 'prompt',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'logo.png', 'mascot.png'],
       manifest: {
         name: 'Study Bunny — Study Companion',
         short_name: 'Study Bunny',
         description: 'Offline-first study companion for Filipino college students',
-        theme_color: '#4f46e5',
-        background_color: '#ffffff',
+        theme_color: '#1A7DB6',
+        background_color: '#F5FAFD',
         display: 'standalone',
         start_url: '/',
         icons: [

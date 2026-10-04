@@ -1,35 +1,56 @@
 import { ApiError, CODES } from './errors.js';
 
-let client;
-/** Atomic per-user daily allowance, shared across all AI routes. TTL cleans old rows. */
-export async function enforceQuota(event, { send, now = new Date(), env = process.env } = {}) {
-  if (!env.QUOTA_TABLE) return; // Local tests have no AWS configuration.
-  const subject = event?.requestContext?.authorizer?.jwt?.claims?.sub;
-  if (!subject) throw new ApiError(401, CODES.UNAUTHORIZED, 'Sign in to use cloud AI');
-  const day = now.toISOString().slice(0, 10);
+/**
+ * Daily allowance per client, shared across all AI routes.
+ *
+ * The deployed adapter sets `event.clientId` (access code + IP address). Two
+ * stores are supported:
+ *   - Upstash Redis over REST when UPSTASH_REDIS_REST_URL and
+ *     UPSTASH_REDIS_REST_TOKEN are set: an accurate counter shared by every
+ *     server instance.
+ *   - Otherwise an in-memory counter: best effort only, because serverless
+ *     instances do not share memory. Pair it with a spend limit at the provider.
+ *
+ * Unit tests that call handlers directly send no `clientId` and are not counted.
+ */
+const memory = new Map();
+
+async function incrementMemory(key, ttlSeconds, nowMs) {
+  for (const [k, v] of memory) if (v.expiresAt <= nowMs) memory.delete(k);
+  const entry = memory.get(key) ?? { count: 0, expiresAt: nowMs + ttlSeconds * 1000 };
+  entry.count += 1;
+  memory.set(key, entry);
+  return entry.count;
+}
+
+async function incrementUpstash(key, ttlSeconds, env, fetchImpl) {
+  const response = await fetchImpl(`${env.UPSTASH_REDIS_REST_URL.replace(/\/$/, '')}/pipeline`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`, 'content-type': 'application/json' },
+    body: JSON.stringify([['INCR', key], ['EXPIRE', key, String(ttlSeconds)]]),
+    signal: AbortSignal.timeout(2000),
+  });
+  if (!response.ok) throw new Error('Quota store unavailable');
+  const result = await response.json();
+  const count = Number(result?.[0]?.result);
+  if (!Number.isFinite(count)) throw new Error('Quota store unavailable');
+  return count;
+}
+
+export async function enforceQuota(event, { increment, now = new Date(), env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  const clientId = event?.clientId;
+  if (!clientId) return; // Direct handler calls in unit tests.
   const limit = Number(env.DAILY_REQUEST_LIMIT ?? 20);
   if (!Number.isInteger(limit) || limit < 1) throw new Error('Invalid quota configuration');
-  try {
-    const input = {
-      TableName: env.QUOTA_TABLE,
-      Key: { pk: { S: `${subject}:${day}` } },
-      UpdateExpression: 'SET expiresAt = :ttl ADD requests :one',
-      ConditionExpression: 'attribute_not_exists(requests) OR requests < :limit',
-      ExpressionAttributeValues: {
-        ':ttl': { N: String(Math.floor(now.getTime() / 1000) + 172800) },
-        ':one': { N: '1' }, ':limit': { N: String(limit) },
-      },
-    };
-    if (send) await send(input); // Test seam: never contact AWS during unit tests.
-    else {
-      const { DynamoDBClient, UpdateItemCommand } = await import('@aws-sdk/client-dynamodb');
-      client ??= new DynamoDBClient({ region: env.AWS_REGION, maxAttempts: 1 });
-      await client.send(new UpdateItemCommand(input), { abortSignal: AbortSignal.timeout(2000) });
-    }
-  } catch (error) {
-    if (error.name === 'ConditionalCheckFailedException') {
-      throw new ApiError(429, CODES.QUOTA_EXCEEDED, 'Daily AI allowance reached. Try again tomorrow or use offline mode.');
-    }
-    throw error; // Fail closed if the quota service is unavailable.
+  const key = `sb:quota:${clientId}:${now.toISOString().slice(0, 10)}`;
+  const ttl = 172800;
+  // Fail closed: if the counter cannot be read, the request does not proceed.
+  const count = increment
+    ? await increment(key, ttl)
+    : env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN
+      ? await incrementUpstash(key, ttl, env, fetchImpl)
+      : await incrementMemory(key, ttl, now.getTime());
+  if (count > limit) {
+    throw new ApiError(429, CODES.QUOTA_EXCEEDED, 'Daily AI allowance reached. Try again tomorrow or use offline mode.');
   }
 }

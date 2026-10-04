@@ -3,7 +3,7 @@
  * Tier names (stable): 'cloud', 'edge', 'deterministic'
  *
  * Resolution order per invocation:
- *   1. Cloud  — configured, signed in, opted in, online, and API health check passes
+ *   1. Cloud  — opted in, access code entered, online, and API health check passes
  *   2. Edge   — if a ready on-device provider is registered (stretch goal; none registered in MVP)
  *   3. Deterministic — always available fallback
  */

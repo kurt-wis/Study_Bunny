@@ -2,14 +2,10 @@
   "name": "cloud-api",
   "version": "1.0.0",
   "private": true,
-  "description": "Study Bunny cloud AI backend: API Gateway HTTP API + Lambda proxying Amazon Bedrock.",
+  "description": "Study Bunny cloud AI backend: request handlers served as Vercel functions, calling the Anthropic API.",
   "type": "module",
   "engines": { "node": "24.x" },
   "scripts": {
     "test": "node --test"
-  },
-  "dependencies": {
-    "@aws-sdk/client-bedrock-runtime": "3.1146.0",
-    "@aws-sdk/client-dynamodb": "3.1146.0"
   }
 }

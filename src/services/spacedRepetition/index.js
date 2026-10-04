@@ -117,6 +117,7 @@ function repetitionsFromInterval(interval) {
  * @returns {number} SM-2 quality score
  */
 export function qualityForAnswer(answer = {}) {
+  if (answer.grade != null) return gradeToQuality(answer.grade);
   if (answer.confidence != null) return confidenceToQuality(answer.confidence);
   return correctnessToQuality(Boolean(answer.isCorrect));
 }
@@ -169,9 +170,11 @@ export async function recordAnswer(documentId, topic, answer = {}, now = new Dat
   const current = state[topic] ?? {};
 
   // ── BKT mastery update (binary correctness signal) ──
-  const isCorrect = answer.confidence != null
-    ? answer.confidence === 'got_it'
-    : Boolean(answer.isCorrect);
+  const isCorrect = answer.grade != null
+    ? gradeIsRecalled(answer.grade)
+    : answer.confidence != null
+      ? answer.confidence === 'got_it'
+      : Boolean(answer.isCorrect);
   const currentMastery = clampMastery(
     typeof current.mastery === 'number' ? current.mastery : getInitialMastery(),
   );
@@ -209,4 +212,40 @@ export async function recordAnswer(documentId, topic, answer = {}, now = new Dat
 function clampMastery(m) {
   if (!Number.isFinite(m)) return getInitialMastery();
   return Math.max(0.01, Math.min(0.99, m));
+}
+
+/* ── Flashcard grades (Again / Hard / Good / Easy) ─────────────────────────── */
+
+/** The four flashcard grades shown under a revealed review card, easiest last. */
+export const REVIEW_GRADES = Object.freeze(['again', 'hard', 'good', 'easy']);
+
+/** SM-2 quality score for each flashcard grade. */
+const GRADE_QUALITY = Object.freeze({ again: 1, hard: 3, good: 4, easy: 5 });
+
+/** Map a flashcard grade to an SM-2 quality score (unknown → lowest). */
+export function gradeToQuality(grade) {
+  return GRADE_QUALITY[grade] ?? GRADE_QUALITY.again;
+}
+
+/** Whether a grade counts as a successful recall for BKT mastery. */
+export function gradeIsRecalled(grade) {
+  return grade === 'good' || grade === 'easy';
+}
+
+/**
+ * Preview the interval (in days) each grade would schedule for a topic, so the
+ * review card can show honest "next in N days" hints before the student rates.
+ * Pure: reads only the topic's current schedule state.
+ */
+export function previewIntervals(state = {}, now = new Date()) {
+  const base = {
+    interval: state?.interval,
+    easeFactor: state?.easeFactor,
+    repetitions: repetitionsFromInterval(state?.interval),
+  };
+  const out = {};
+  for (const grade of REVIEW_GRADES) {
+    out[grade] = sm2(base, gradeToQuality(grade), now).interval;
+  }
+  return out;
 }

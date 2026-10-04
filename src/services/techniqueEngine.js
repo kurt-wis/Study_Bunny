@@ -55,13 +55,13 @@ const PLATEAU_EPSILON = 0.05;
 /** Supporting evidence cited in every deterministic recommendation (Req 6.2). */
 export const EVIDENCE = {
   feynman:
-    'Explaining a concept in your own words (self-explanation / the Feynman ' +
-    'technique) exposes gaps that passive review hides — a high-utility ' +
-    'practice in Dunlosky et al. (2013).',
+    'Explaining a topic in your own words shows you what you do not ' +
+    'understand yet. Research rates it as a very effective way to study ' +
+    '(Dunlosky et al., 2013).',
   spaced_repetition:
-    'Spacing practice over time (distributed practice) and retrieval via ' +
-    'quizzing (practice testing) are the two highest-utility techniques in ' +
-    'Dunlosky et al. (2013).',
+    'Short reviews spread over several days help you remember longer than ' +
+    'one long session. Research rates this as one of the most effective ways ' +
+    'to study (Dunlosky et al., 2013).',
 };
 
 /**
@@ -120,8 +120,8 @@ export function recommendTechnique({
       action: 'keep',
       technique: null,
       reason:
-        'Your current approach is working — your score is at or above 70% and ' +
-        'mastery is still climbing. Keep going.',
+        'Your way of studying is working. Your score is 70% or higher and ' +
+        'still going up. Keep going.',
       evidence: null,
     };
   }
@@ -134,17 +134,17 @@ export function recommendTechnique({
   if (typeof quizScore === 'number' && quizScore < KEEP_THRESHOLD) {
     triggers.push(`your last score was ${Math.round(quizScore * 100)}%`);
   }
-  if (plateaued) triggers.push('mastery has plateaued over your last few attempts');
+  if (plateaued) triggers.push('your scores have stopped going up (a plateau)');
   if (habitIsLowEffectiveness) {
-    triggers.push(`${habit.name.toLowerCase()} is a low-impact study method`);
+    triggers.push(`${habit.name.toLowerCase()} alone does not help much`);
   }
   const weakCount = Array.isArray(weakTopics) ? weakTopics.length : 0;
 
   const why = triggers.length
     ? `Because ${triggers.join(' and ')}, `
-    : 'To make your study time count, ';
+    : 'To get more from your study time, ';
   const weakNote = weakCount
-    ? ` Focus it on your ${weakCount} weak topic${weakCount === 1 ? '' : 's'}.`
+    ? ` Use it on your ${weakCount} weak topic${weakCount === 1 ? '' : 's'} first.`
     : '';
 
   return {

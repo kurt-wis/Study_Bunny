@@ -1,9 +1,10 @@
 /**
- * Tier 2 Summarization — Cloud AI (Amazon Bedrock via Lambda).
+ * Tier 2 Summarization — Cloud AI (the hosted model behind this site's /api routes).
  * Calls POST /api/summarize with document chunks (chunks only — never raw
  * filenames, titles, or student identifiers).
  */
 import { apiPost } from '../../utils/apiTransport.js';
+import { SUMMARY_VERSION, toKeyPoints } from './summarizeTier3.js';
 
 /**
  * Generate a cloud-AI summary from document chunk records.
@@ -36,9 +37,11 @@ export async function summarizeTier2(rawText, chunkRecords, language) {
     tier: 'cloud',
     format: 'ai',
     content: {
+      version: SUMMARY_VERSION,
       overview: response.overview ?? '',
-      keyConcepts: response.keyConcepts ?? [],
-      studyOutline: (response.studyOutline ?? []).map(name => ({ name, keywords: [] })),
+      keyPoints: toKeyPoints(response.overview ?? ''),
+      keyConcepts: (response.keyConcepts ?? []).slice(0, 5),
+      studyOutline: (response.studyOutline ?? []).slice(0, 5).map(name => ({ name, keywords: [] })),
       keyTopics: (response.keyConcepts ?? []).map(c => c.term),
       topSentences: [],
     },

@@ -152,3 +152,17 @@ test('result is always well-formed, including on empty / malformed input', () =>
   assert.ok(Array.isArray(messy.matchedKeywords));
   assert.ok(Array.isArray(messy.matchedPassages));
 });
+
+test('word forms and common synonyms count as the same idea', async () => {
+  const { evaluateFeynmanTier3, canonical } = await import('./feynmanTier3.js');
+  assert.equal(canonical('produces'), canonical('make'));
+  assert.equal(canonical('stored'), canonical('stores'));
+  const r = evaluateFeynmanTier3({
+    explanation: 'The mitochondria makes power for cells.',
+    chunks: ['Mitochondria produce energy for the cell.'],
+  });
+  assert.deepEqual(r.missedKeywords, []);
+  assert.equal(r.coverage, 1);
+  const off = evaluateFeynmanTier3({ explanation: 'It is a plant.', chunks: ['Mitochondria produce energy for the cell.'] });
+  assert.equal(off.coverage, 0);
+});

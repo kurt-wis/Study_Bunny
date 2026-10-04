@@ -8,6 +8,30 @@
 
 ---
 
+## Changes since v5.0 (October 4, 2026)
+
+- **Navigation** is Home / Review / Quiz / Profile (side menu on wide screens, bottom tabs on phones). Dashboard is opened from inside a document.
+- **Brand** changed to the sky-blue Study Bunny look with the bunny mascot and logo (section 11).
+- **Home** shows a daily goal, study streak, study time, topics mastered, today's plan and a learning curve.
+- **Profile** added: name, totals, reminders, sound effects, dark appearance, data export, clear data, Cloud AI consent.
+- **Review** asks for the technique first (Spaced Repetition, Feynman, Pomodoro) with a "Skip, use flashcards" option, then the module/handout. Flashcards are rated Again / Hard / Good / Easy.
+- **Technique suggestions** appear after a weak review and on the learning-curve page when scores are low or stuck.
+- **Summaries** are short and structured: three key points, up to five key ideas, a study order.
+- **Feynman** results show the student's explanation next to what the notes say, with covered and missing ideas marked.
+- **Listen to this lesson**: a read-aloud script with a mini-quiz, using the device's built-in voice (offline).
+- **Study tips**: up to four personal tips per lesson, from the lesson content and the student's progress (offline).
+- **Better offline questions**: handouts that define terms ("Men - a male person") are quizzed on the term ("________ - a male person"), and summaries list terms with their meanings.
+- **Pre-quiz survey** and **topic mastery bars on quiz results** are built.
+- **More handout layouts**: tables, two-column glossaries, and a term on one line with its meaning on the next are recognised. Plain-paragraph quizzes blank one short word per sentence and change every time.
+- **Feynman matching** accepts different word forms and common synonyms ("makes" for "produce").
+- **All screens share the new look**: Document, Chat, Check-notes and Dashboard use the same header and cards; no emoji icons. Install icons use the logo.
+- **Animations** added (section 11.3).
+- **Module clean-up at upload**: name, section, date and score fields, page numbers, repeated headers and footers, school letterhead, blank answer lines, links and copyright lines are removed before the module is saved, so quizzes and summaries only use lesson content.
+- **Students can fix generated content**: each module has a Cards tab where terms and meanings can be edited, removed or added, with a reset to the automatic list. Flashcards, offline quizzes and the summary are rebuilt from the corrected cards. Flashcards and quiz feedback link straight to it.
+- **Cloud AI moved off AWS**: the optional AI tier now runs as Vercel functions in `/api`, calling whichever AI service is set on the server (Gemini, Groq, OpenAI or Claude). Students opt in with a consent box and a shared access code; there are no accounts or sign-in.
+
+---
+
 ## 1. One-Line Description
 
 Study Bunny is a free, offline-first PWA that turns uploaded PDF notes into adaptive quizzes, diagnoses how you study, recommends evidence-based learning techniques, and lets you apply those techniques to your own materials â€” all on a â‚±5,000 phone with no internet.
@@ -33,7 +57,7 @@ The app answers three questions no other study tool asks:
 
 | Tier | Engine | Requires | Quality | Offline? |
 |------|--------|----------|---------|----------|
-| Tier 2: Cloud AI | Claude 3 Haiku via Amazon Bedrock + Lambda | Internet | Best | âŒ |
+| Tier 2: Cloud AI | A hosted AI model (Gemini, Groq, OpenAI or Claude; chosen in server settings) via the app's own `/api` server functions | Internet + consent + access code | Best | âŒ |
 | Tier 1: On-Device AI | SmolLM2 via llama.cpp WASM | 4GB+ RAM, cached model | Good | âœ… |
 | Tier 3: Deterministic | RAKE + TF-IDF + BKT + Templates | Nothing | Functional | âœ… |
 
@@ -42,12 +66,17 @@ The app detects the best available tier on **every feature call.** No loading sc
 ### 3.2 Tier Detection Logic
 
 ```
-detectTier():
-  IF manual override â†’ USE override
-  IF navigator.onLine AND /api/health responds â†’ TIER 2
-  IF WASM supported AND deviceMemory â‰¥ 4GB AND model cached â†’ TIER 1
-  ELSE â†’ TIER 3
+resolveTier(feature):
+  IF manual override is "offline"                          → TIER 3
+  IF online AND student gave consent AND access code saved
+     AND /api/health answers { "status": "ok" }            → TIER 2
+  IF an on-device model is registered and ready (none yet) → TIER 1
+  ELSE                                                     → TIER 3
 ```
+
+If a Cloud AI call fails part-way, the feature re-runs its offline path and
+shows the "Offline mode" badge. Tier 1 is a future option; no on-device model
+ships today.
 
 ### 3.3 Tech Stack
 
@@ -61,10 +90,10 @@ detectTier():
 | Keyword extraction | RAKE (pure JS, zero dependencies) |
 | Text search | TF-IDF (pure JS) |
 | Adaptive learning | BKT â€” Bayesian Knowledge Tracing (pure JS) |
-| Cloud LLM | Amazon Bedrock (Claude 3 Haiku) |
-| Cloud compute | AWS Lambda (Node.js 20) |
-| API routing | API Gateway (HTTP API) |
-| Hosting | AWS Amplify (auto-deploy from GitHub) |
+| Cloud LLM | Any one of Gemini, Groq, OpenAI, OpenRouter or Anthropic, set by `AI_PROVIDER` / `AI_MODEL` (Gemini and Groq have free tiers) |
+| Cloud compute | Vercel serverless functions (`/api/*.js`, Node.js) |
+| API routing | Same-origin `/api` routes; shared access code + daily limit per device |
+| Hosting | Vercel (auto-deploy from GitHub) |
 | IDE | Kiro (specs-driven development) |
 
 ---
@@ -75,270 +104,88 @@ detectTier():
 
 | Section | Purpose | Entry Point |
 |---------|---------|-------------|
-| **HOME** | Upload PDFs, manage document library | App launch |
-| **QUIZ** | Adaptive quiz â†’ identify weak topics â†’ diagnose study technique | Tap a document â†’ "Quiz" |
-| **REVIEW** | Pick a learning technique â†’ apply to a module â†’ guided study session | Tap a document â†’ "Review" OR recommended after quiz |
-| **DASHBOARD** | Learning curve, mastery map, technique effectiveness | Tap a document â†’ "Dashboard" OR shown after quiz/review |
+| **HOME** | Daily goal, streak, study time, topics mastered, study sets, PDF upload, today's plan, learning curve | App launch |
+| **REVIEW** | Pick a learning technique (or skip to flashcards) → pick a module/handout → guided study session | Workspace menu, a document's "Review" button, or a recommendation after a quiz |
+| **QUIZ** | Adaptive quiz → identify weak topics → diagnose study technique | Workspace menu (opens the last module studied) or a document's "Quiz" button |
+| **PROFILE** | Name, totals, study reminders, sound effects, dark appearance, data export, clear data, optional Cloud AI | Workspace menu |
+| **DASHBOARD** | Learning curve, mastery map, technique effectiveness, technique suggestion | Inside a document, or after a quiz/review |
 
 ### 4.2 Navigation
 
 ```
-Bottom Navigation Bar (always visible):
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  ðŸ  Home â”‚  ðŸ“ Quiz â”‚  ðŸ“– Reviewâ”‚ ðŸ“Š Dashboardâ”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+Workspace menu (always visible):
+  wide screens → side menu      phones → bottom tab bar
+
+  Home | Review | Quiz | Profile
 ```
 
 - Home is the default landing page
-- Quiz, Review, and Dashboard are document-scoped (user selects a document first)
-- Tier badge (ðŸŸ¢ðŸ”µðŸŸ¡) visible in the top-right corner of every screen
+- Review asks for the technique first, then the module/handout
+- Quiz opens the last module studied; Dashboard is opened from inside a document
+- The tier badge (Cloud AI / On-device AI / Offline mode) is shown on every AI-powered result
 
 ---
 
 ## 5. HOME Section
 
 ### 5.1 Purpose
-Upload PDFs, view document library, select a document to study.
+The daily starting point: what is due, how the student is doing, and where to add notes.
 
-### 5.2 Screens
+### 5.2 Screen
+From top to bottom:
 
-#### 5.2.1 Home â€” Empty State
-**When:** No documents uploaded yet.
-
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  Study Bunny          ðŸŸ¡ Offline   â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚       ðŸ“„                        â”‚
-â”‚   Upload your first PDF         â”‚
-â”‚   to start studying             â”‚
-â”‚                                 â”‚
-â”‚   Your notes. Your device.      â”‚
-â”‚   Your pace.                    â”‚
-â”‚                                 â”‚
-â”‚   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”      â”‚
-â”‚   â”‚  ðŸ“¤ Upload PDF       â”‚      â”‚
-â”‚   â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜      â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
-
-#### 5.2.2 Home â€” Document Library
-**When:** One or more documents uploaded.
-
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  Study Bunny          ðŸ”µ Cloud AI  â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ ðŸ“„ Calculus Ch.3        â”‚   â”‚
-â”‚  â”‚    12 pages Â· 3 quizzes â”‚   â”‚
-â”‚  â”‚    Mastery: 45% â–ˆâ–ˆâ–ˆâ–ˆâ–‘â–‘  â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ ðŸ“„ Philippine History   â”‚   â”‚
-â”‚  â”‚    8 pages Â· 1 quiz     â”‚   â”‚
-â”‚  â”‚    Mastery: 72% â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–‘ â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ ðŸ“„ Data Structures      â”‚   â”‚
-â”‚  â”‚    15 pages Â· 0 quizzes â”‚   â”‚
-â”‚  â”‚    Mastery: New         â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚            [+ Upload PDF]       â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
-
-**Tap a document â†’ enters document scope â†’ bottom nav shows Quiz, Review, Dashboard for that document.**
+1. **Greeting** with the date, and a bell that opens reminder settings.
+2. **Daily goal** banner with the mascot. It changes with the data: "Start with your notes" (no modules), "Keep your momentum going" (cards due, with a Start review button), or "You are all caught up" (Take a quiz).
+3. **Three stats**: current streak (and best), study time this week, topics mastered.
+4. **Continue learning**: one row per module with its mastery bar, when it was last studied, and a delete button. Empty state: "No documents yet".
+5. **Add notes**: drag-and-drop or Upload PDF.
+6. **Today's plan**: sessions finished today, due cards to review, and a quiz for the weakest module.
+7. **Learning curve**: scores of the last seven sessions, with a link to a technique suggestion when scores are not going up.
 
 ### 5.3 Upload Flow
-
-1. User taps "Upload PDF" â†’ file picker opens (accept `.pdf` only)
-2. PDF.js extracts text page by page
-3. Text chunked into 400-token segments with 50-token overlap (sentence-aware)
-4. Document + chunks saved to IndexedDB
-5. Progress bar shown during extraction
-6. On complete â†’ navigate to document's Quiz section
+Choose or drop a PDF → text is read page by page on the device → the text is split into chunks → the module is saved → the module page opens. Scanned, empty or protected PDFs show a clear error.
 
 ### 5.4 Technical Requirements
-
-- PDF.js with web worker for non-blocking extraction
-- Max file size: 50MB (soft limit, warn user)
-- Estimated storage: ~350KB per document in IndexedDB
-- Document card shows: title (filename minus .pdf), page count, quiz count, overall mastery %
+- PDF.js runs locally; nothing is uploaded.
+- Before saving, `src/utils/cleanModule.js` removes lines that are not the lesson (form fields, dates, page numbers, repeated headers and footers, letterhead, blanks, links). If that would remove most of a document, the original text is kept.
+- Both a flattened text and a line-by-line text are stored. The line-by-line text keeps glossary lines such as "Men - a male person" intact.
+- Limits: 20 MB, 300 pages, 1,000,000 characters.
 
 ---
 
 ## 6. QUIZ Section
 
 ### 6.1 Purpose
-Test the student's knowledge, track mastery per topic via BKT, identify weak areas, diagnose study technique, and recommend improvements.
+Find out what the student does not know yet, and whether the way they study is working.
 
 ### 6.2 Flow
 
 ```
-Quiz Section Entry
-  â†’ Pre-Quiz: Study Technique Survey (first time per document)
-  â†’ Quiz: 5 adaptive questions
-  â†’ Results: Score + weak topics
-  â†’ Post-Quiz: Technique Diagnosis + AI Recommendation
-  â†’ CTA: "Try Review Mode with [recommended technique]"
+Quiz (menu or a module's Quiz button)
+  → First time on a module: "How do you usually study this?" survey (can be skipped)
+  → 5 questions, feedback after each answer
+  → Results: score, topic mastery bars, review of every question
+  → If the score is under 70% or stuck: study tip with another technique to try
+  → Links to explain weak topics (Feynman), take another quiz, or view mastery
 ```
 
 ### 6.3 Screens
 
-#### 6.3.1 Pre-Quiz: Study Technique Survey
-**When:** First quiz on this document, OR user hasn't set a technique yet.
+**6.3.1 Pre-quiz survey.** Eight habits: re-reading, highlighting, writing summaries, flashcards, practice tests, explaining to someone, group study, video lessons. Saved once per module on the device and used by the technique suggestion.
 
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  â† Calculus Ch.3   ðŸ”µ Cloud AI  â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  Before we start, how do you    â”‚
-â”‚  usually study this material?   â”‚
-â”‚                                 â”‚
-â”‚  â—‹ Re-reading notes             â”‚
-â”‚  â—‹ Highlighting key parts       â”‚
-â”‚  â—‹ Summarizing in own words     â”‚
-â”‚  â—‹ Flashcards                   â”‚
-â”‚  â—‹ Practice testing / quizzes   â”‚
-â”‚  â—‹ Teaching it to someone       â”‚
-â”‚  â—‹ Group study                  â”‚
-â”‚  â—‹ Watching video explanations  â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”       â”‚
-â”‚  â”‚  Start Quiz â†’        â”‚       â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜       â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
+**6.3.2 Quiz.** One question per screen with a progress bar and counter.
 
-**Stored as:** `{ documentId, technique: 'rereading', setAt: timestamp }`
+| Tier | Question types |
+|------|----------------|
+| Tier 3 (offline), handout defines terms | Fill in the blank on the term (`________ - a male person`) and true/false that pairs a term with the right or a wrong meaning |
+| Tier 3 (offline), plain text | Fill in the blank on a key phrase and true/false on sentences from the notes |
+| Tier 2 (Cloud AI) | Multiple choice with four options |
 
-#### 6.3.2 Quiz: 5 Adaptive Questions
-**Question types by tier:**
+Weak and never-seen terms are asked first. Feedback shows the exact line from the notes.
 
-| Tier | Question Types |
-|------|---------------|
-| Tier 2 (Bedrock) | MCQ with 4 options + distractor explanations |
-| Tier 3 (Offline) | Fill-in-blank (RAKE keyword removal) + True/False (keyword swap) |
-| Tier 1 (On-device) | SLM-generated MCQ (stretch goal) |
+**6.3.3 Results.** Score, a mastery bar per topic (Needs work / Learning / Mastered), each question with the student's answer, the correct answer and the line from the notes.
 
-**Adaptive logic (BKT):**
-- First quiz: balanced across all detected topics
-- Subsequent quizzes: â‰¥3 of 5 questions target weak topics (mastery < 0.6)
-- BKT updates after EACH answer, not just at quiz end
-
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  â† Calculus Ch.3   ðŸ”µ Cloud AI  â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚  Question 2 of 5                â”‚
-â”‚  Topic: Derivatives             â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  What is the derivative of      â”‚
-â”‚  f(x) = 3xÂ² + 2x?             â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ A) 6x + 2               â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ B) 3x + 2               â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ C) 6xÂ² + 2              â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ D) 6x                   â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
-
-**After answering:** Show correct/incorrect + explanation + source passage from notes.
-
-#### 6.3.3 Quiz Results
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  â† Calculus Ch.3   ðŸ”µ Cloud AI  â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  Score: 2/5 (40%)              â”‚
-â”‚                                 â”‚
-â”‚  Topic Mastery:                 â”‚
-â”‚  Derivatives    â–ˆâ–ˆâ–‘â–‘â–‘â–‘â–‘â–‘ 25%   â”‚
-â”‚  Integrals      â–ˆâ–ˆâ–ˆâ–ˆâ–‘â–‘â–‘â–‘ 52%   â”‚
-â”‚  Limits         â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–‘â–‘ 71%   â”‚
-â”‚  Chain Rule     â–ˆâ–‘â–‘â–‘â–‘â–‘â–‘â–‘ 15%   â”‚
-â”‚                                 â”‚
-â”‚  âš ï¸ Weak areas: Derivatives,   â”‚
-â”‚     Chain Rule                  â”‚
-â”‚                                 â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚  ðŸ“Š View Learning Curve         â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
-
-#### 6.3.4 Post-Quiz: Technique Diagnosis
-**Shown after quiz results if score < 70%.**
-
-**Tier 3 (Offline):**
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  â† Calculus Ch.3   ðŸŸ¡ Offline   â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  ðŸ’¡ Study Technique Analysis    â”‚
-â”‚                                 â”‚
-â”‚  You're using: Re-reading       â”‚
-â”‚  Effectiveness: Low             â”‚
-â”‚  (Dunlosky et al., 2013)       â”‚
-â”‚                                 â”‚
-â”‚  Your mastery in Derivatives    â”‚
-â”‚  has plateaued at 25% across    â”‚
-â”‚  3 quiz attempts.               â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ ðŸ”¬ Recommended:          â”‚   â”‚
-â”‚  â”‚ PRACTICE TESTING          â”‚   â”‚
-â”‚  â”‚                           â”‚   â”‚
-â”‚  â”‚ Research shows it's 2.5x  â”‚   â”‚
-â”‚  â”‚ more effective than        â”‚   â”‚
-â”‚  â”‚ re-reading for procedural â”‚   â”‚
-â”‚  â”‚ knowledge like Calculus.   â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ Try Practice Testing â†’    â”‚   â”‚
-â”‚  â”‚ (Opens Review Mode)       â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ Retake Quiz Instead       â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
-
-**Tier 2 (Bedrock) â€” enhanced analysis:**
-Bedrock receives: weak topics, current technique, mastery history, topic type.
-Returns: personalized analysis explaining WHY the current technique isn't working for THIS specific material + tailored recommendation.
+**6.3.4 Study tip.** Shown when the score is under 70% or mastery has stopped rising. Gives the reason in plain words, the research behind it, and a button that opens Review with the suggested technique.
 
 ### 6.4 BKT Engine
 
@@ -368,437 +215,75 @@ function updateMastery(currentMastery, isCorrect) {
 ```
 
 ### 6.5 Technique Recommendation Engine
+`src/services/techniqueEngine.js`, offline rules:
 
-```javascript
-const TECHNIQUES = {
-  rereading:       { name: 'Re-reading',               effectiveness: 'low' },
-  highlighting:    { name: 'Highlighting',              effectiveness: 'low' },
-  summarizing:     { name: 'Summarizing',               effectiveness: 'low' },
-  flashcards:      { name: 'Flashcards',                effectiveness: 'moderate' },
-  group_study:     { name: 'Group Study',               effectiveness: 'moderate' },
-  video:           { name: 'Video Explanations',        effectiveness: 'moderate' },
-  self_explain:    { name: 'Teaching / Self-Explanation',effectiveness: 'moderate' },
-  practice_test:   { name: 'Practice Testing',          effectiveness: 'high' },
-  distributed:     { name: 'Spaced Retrieval',          effectiveness: 'high' },
-  interleaved:     { name: 'Interleaved Practice',      effectiveness: 'high' },
-};
-
-function recommendTechnique(currentTechnique, quizScore, weakTopics, masteryHistory) {
-  const current = TECHNIQUES[currentTechnique];
-
-  if (quizScore >= 0.7) {
-    return {
-      keep: true,
-      message: `${current.name} is working for you. Keep going.`,
-    };
-  }
-
-  // Check for plateau (3+ attempts, mastery not improving)
-  const isPlateaued = masteryHistory.length >= 3 &&
-    Math.abs(masteryHistory[masteryHistory.length - 1] - masteryHistory[masteryHistory.length - 3]) < 0.05;
-
-  if (current.effectiveness === 'low' || isPlateaued) {
-    return {
-      keep: false,
-      recommended: 'practice_test',
-      message: `${current.name} is a passive technique. Practice Testing is 2.5x more effective for topics like: ${weakTopics.join(', ')}.`,
-      action: 'Try answering questions from memory BEFORE re-reading.',
-      evidence: 'Dunlosky et al., 2013 â€” Improving Students\' Learning With Effective Learning Techniques',
-    };
-  }
-
-  if (current.effectiveness === 'moderate') {
-    return {
-      keep: false,
-      recommended: 'distributed',
-      message: `${current.name} is decent, but spacing your study sessions dramatically improves long-term retention.`,
-      action: 'Study this topic now, then come back in 1-3 days for a follow-up quiz.',
-      evidence: 'Cepeda et al., 2006 â€” Distributed Practice in Verbal Recall Tasks',
-    };
-  }
-
-  // Already using high-effectiveness technique
-  return {
-    keep: true,
-    message: `You're using the right technique. Focus more time on: ${weakTopics.join(', ')}.`,
-    action: 'Your next quiz will target your weak areas specifically.',
-  };
-}
-```
+- Score 70% or higher, still rising, and the current habit is not a low-impact one → keep going.
+- Otherwise → suggest **Feynman** or **Spaced Repetition**, whichever the student is not already using.
+- Low-impact habits: re-reading, highlighting, summarising (Dunlosky et al., 2013).
+- With Cloud AI on, `/api/analyze-technique` writes the explanation; the offline rule still decides whether a switch is needed.
 
 ---
 
 ## 7. REVIEW Section
 
 ### 7.1 Purpose
-Apply a specific learning technique to a specific module. Generates a guided study session and tracks its own learning curve to prove technique effectiveness.
+Apply one learning technique to one module, and record the result so the learning curve can show whether it works.
 
 ### 7.2 Flow
 
 ```
-Review Section Entry
-  â†’ Pick a Learning Technique (or use AI recommendation)
-  â†’ Pick a Module (uploaded PDF)
-  â†’ Guided Study Session (technique-specific)
-  â†’ Session Results + Mastery Update
-  â†’ Learning Curve Updated (tagged with technique)
+Review
+  → Step 1: How do you want to review?  (or "Skip, use flashcards")
+  → Step 2: Which module or handout?    (weak topics shown under each)
+  → Guided session for that technique
+  → Results + mastery update, tagged with the technique
+  → If it went badly: suggestion to try a different technique
 ```
 
-### 7.3 Screens
+### 7.3 Techniques
 
-#### 7.3.1 Technique Selection
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  â† Review Mode     ðŸ”µ Cloud AI  â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  Pick a learning technique:     â”‚
-â”‚                                 â”‚
-â”‚  â­ RECOMMENDED                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ ðŸ”¬ Practice Testing      â”‚   â”‚
-â”‚  â”‚ High effectiveness       â”‚   â”‚
-â”‚  â”‚ "Test yourself before    â”‚   â”‚
-â”‚  â”‚  re-reading"             â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  ALL TECHNIQUES                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ ðŸ§  Feynman Technique     â”‚   â”‚
-â”‚  â”‚ Explain it in your words â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ â° Spaced Retrieval      â”‚   â”‚
-â”‚  â”‚ Quiz now, re-quiz later  â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ â“ Elaborative Questions  â”‚   â”‚
-â”‚  â”‚ Deep "why" and "how"     â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
+| Technique | Session |
+|-----------|---------|
+| **Flashcards** (skip option) | Question on the front, answer and the line from the notes on the back. Rated Again / Hard / Good / Easy. |
+| **Spaced Repetition** | The same flashcards, with due topics first. Each rating sets when the topic comes back (SM-2). |
+| **Feynman** | Pick a weak topic, explain it from memory, optionally peek at the notes. The result shows the explanation beside the notes with covered ideas in green and missing ones underlined. |
+| **Pomodoro** | Flashcards with a 25-minute focus timer. |
 
-#### 7.3.2 Module Selection
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  â† Practice Testing ðŸ”µ Cloud AI â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  Apply to which module?         â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ ðŸ“„ Calculus Ch.3         â”‚   â”‚
-â”‚  â”‚    Weak: Derivatives,    â”‚   â”‚
-â”‚  â”‚    Chain Rule             â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ ðŸ“„ Philippine History    â”‚   â”‚
-â”‚  â”‚    Weak: Propaganda      â”‚   â”‚
-â”‚  â”‚    Movement               â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ ðŸ“„ Data Structures       â”‚   â”‚
-â”‚  â”‚    No quiz data yet      â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
-
-#### 7.3.3 Guided Study Sessions (Technique-Specific)
-
-Each technique generates a DIFFERENT study experience from the SAME PDF:
-
----
-
-**PRACTICE TESTING:**
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  Practice Testing Ã— Calculus    â”‚
-â”‚  Focus: Derivatives, Chain Rule â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  Question 1 of 5                â”‚
-â”‚                                 â”‚
-â”‚  Without looking at your notes, â”‚
-â”‚  answer this:                   â”‚
-â”‚                                 â”‚
-â”‚  "Explain how the chain rule    â”‚
-â”‚   applies to composite          â”‚
-â”‚   functions."                   â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚                           â”‚   â”‚
-â”‚  â”‚  [Type your answer...]    â”‚   â”‚
-â”‚  â”‚                           â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚  Check Answer â†’           â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
-
-After submitting:
-- **Tier 2:** Bedrock compares student's answer to source passages, identifies gaps, scores understanding
-- **Tier 3:** TF-IDF similarity between student's answer and relevant chunks â†’ show matching passages â†’ student self-rates: "Did I get it right?" (Yes/Partially/No)
-
----
-
-**FEYNMAN TECHNIQUE:**
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  Feynman Ã— Calculus             â”‚
-â”‚  Topic: Derivatives             â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  Explain this concept as if     â”‚
-â”‚  you're teaching a classmate    â”‚
-â”‚  who missed the lecture:        â”‚
-â”‚                                 â”‚
-â”‚  "What are derivatives and      â”‚
-â”‚   why do we use them?"          â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚                           â”‚   â”‚
-â”‚  â”‚  [Type your explanation]  â”‚   â”‚
-â”‚  â”‚                           â”‚   â”‚
-â”‚  â”‚                           â”‚   â”‚
-â”‚  â”‚                           â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚  Submit Explanation â†’     â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
-
-After submitting:
-- **Tier 2:** Bedrock analyzes explanation â†’ "You covered the definition well but missed: chain rule application, relationship to rate of change" â†’ shows relevant source passages
-- **Tier 3:** TF-IDF matches explanation against chunks â†’ shows which chunks were NOT covered â†’ "You might have missed these concepts:" + list of unmatched keywords
-
----
-
-**SPACED RETRIEVAL:**
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  Spaced Retrieval Ã— Calculus    â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  Session 1 of 4                 â”‚
-â”‚  (Now â†’ 1 day â†’ 3 days â†’ 7 days)â”‚
-â”‚                                 â”‚
-â”‚  5 recall questions on          â”‚
-â”‚  Derivatives + Chain Rule       â”‚
-â”‚                                 â”‚
-â”‚  [Same quiz UI as Quiz Section] â”‚
-â”‚                                 â”‚
-â”‚  After completion:              â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ âœ… Session 1 complete     â”‚   â”‚
-â”‚  â”‚ Next session: Tomorrow    â”‚   â”‚
-â”‚  â”‚ at ~2:30 AM               â”‚   â”‚
-â”‚  â”‚                           â”‚   â”‚
-â”‚  â”‚ We'll remind you.         â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
-
----
-
-**ELABORATIVE INTERROGATION:**
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  Elaborative Ã— Calculus         â”‚
-â”‚  Topic: Chain Rule              â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  Question 1 of 5                â”‚
-â”‚                                 â”‚
-â”‚  Your notes say:                â”‚
-â”‚  "The chain rule is used to     â”‚
-â”‚   differentiate composite       â”‚
-â”‚   functions."                   â”‚
-â”‚                                 â”‚
-â”‚  WHY is this true?              â”‚
-â”‚  What would happen WITHOUT      â”‚
-â”‚  the chain rule?                â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚                           â”‚   â”‚
-â”‚  â”‚  [Type your reasoning]    â”‚   â”‚
-â”‚  â”‚                           â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚  See Explanation â†’        â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
-
-### 7.4 Review Session Results
-
-After completing any technique session:
-
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  Session Complete!              â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  Technique: Practice Testing    â”‚
-â”‚  Module: Calculus Ch.3          â”‚
-â”‚  Focus: Derivatives, Chain Rule â”‚
-â”‚                                 â”‚
-â”‚  Performance: 3/5 correct       â”‚
-â”‚  Mastery update:                â”‚
-â”‚  Derivatives  25% â†’ 42% â†‘      â”‚
-â”‚  Chain Rule   15% â†’ 31% â†‘      â”‚
-â”‚                                 â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ ðŸ“Š View Learning Curve   â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ ðŸ”„ Another Session       â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚ ðŸ“ Take a Quiz to Test   â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
+### 7.4 Results
+Flashcards: cards recalled, the rating and next review date per topic. Feynman: a one-line verdict, key ideas covered, and what to add next time.
 
 ### 7.5 Technique-Specific Generation
 
-| Technique | Tier 3 (Offline) | Tier 2 (Bedrock) |
-|-----------|-----------------|-------------------|
-| Practice Testing | RAKE keywords â†’ fill-in-blank recall questions | Bedrock generates open-ended recall questions |
-| Feynman | TF-IDF similarity score + unmatched keyword list | Bedrock analyzes explanation quality + identifies gaps |
-| Spaced Retrieval | Same quiz engine, scheduled intervals, stored locally | Bedrock generates varied questions per interval |
-| Elaborative | Template: "Why does [keyword] matter?" + show source passage | Bedrock generates deep "why/how" questions from context |
+| Technique | Tier 3 (Offline) | Tier 2 (Cloud AI) |
+|-----------|------------------|-------------------|
+| Flashcards / Spaced Repetition | Term blanks from definitions, or keyword blanks from plain text | Multiple-choice questions from `/api/quiz` |
+| Feynman | Key-idea match against the lines about that topic | Feedback on meaning and gaps from `/api/feynman` |
+| Pomodoro | Timer only; no generation | Same |
 
-### 7.6 MVP Scope for Review
-
-**Must build (for demo):**
-- Practice Testing (reuses quiz engine with open-ended format)
-- Technique selection screen
-- Module selection screen
-- Session results with mastery update
-
-**Should build (if time):**
-- Feynman Technique (text input + TF-IDF comparison)
-- Spaced Retrieval (scheduled intervals)
-
-**Won't build (post-hackathon):**
-- Elaborative Interrogation
-- Interleaved Practice
-- Mind Mapping
+### 7.6 Not built
+Elaborative questions, interleaved practice and mind mapping.
 
 ---
 
 ## 8. DASHBOARD Section
 
 ### 8.1 Purpose
-Visualize the student's learning journey: mastery per topic over time, technique effectiveness, and the inflection point where switching techniques improved performance.
+Show whether mastery is rising, and which technique is helping.
 
-### 8.2 Screens
+### 8.2 Screen (opened from a module, or after a quiz or review)
 
-#### 8.2.1 Learning Curve (Primary View)
+1. **Learning curve**: score per session over time, labelled by technique, with the first technique switch marked.
+2. **Try a different way to study**: shown when the latest score is under 70% or the curve is flat.
+3. **Topic mastery**: a bar per topic, weakest first.
+4. **What is working**: average gain per session for each technique, and how many sessions came from quizzes and from reviews.
 
-```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  â† Calculus Ch.3   ðŸ”µ Cloud AI  â”‚
-â”‚  ðŸ“Š Dashboard                    â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚                                 â”‚
-â”‚  Learning Curve                 â”‚
-â”‚                                 â”‚
-â”‚  100%â”¤                          â”‚
-â”‚      â”‚                    â—â”€â”€â—  â”‚
-â”‚   75%â”¤               â—â”€â”€â—      â”‚
-â”‚      â”‚          â—â”€â”€â—            â”‚
-â”‚   50%â”¤     â—â”€â”€â—                 â”‚
-â”‚      â”‚  â—â”€â—  â†‘ Switched to     â”‚
-â”‚   25%â”¤â—â”€â—   Practice Testing   â”‚
-â”‚      â”‚                          â”‚
-â”‚    0%â”¼â”€â”€â”¬â”€â”€â”¬â”€â”€â”¬â”€â”€â”¬â”€â”€â”¬â”€â”€â”¬â”€â”€â†’    â”‚
-â”‚      Q1 Q2 Q3 R1 R2 R3 Q4     â”‚
-â”‚                                 â”‚
-â”‚  â”€â”€ Quiz (Re-reading)           â”‚
-â”‚  â”€â”€ Review (Practice Testing)   â”‚
-â”‚                                 â”‚
-â”‚  âš¡ Mastery improved 35% â†’ 78% â”‚
-â”‚     after switching techniques  â”‚
-â”‚                                 â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚  Topic Mastery                  â”‚
-â”‚                                 â”‚
-â”‚  Derivatives    â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–‘â–‘ 72%   â”‚
-â”‚  Chain Rule     â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–‘â–‘â–‘ 58%   â”‚
-â”‚  Integrals      â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–‘ 85%   â”‚
-â”‚  Limits         â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆ 91%   â”‚
-â”‚                                 â”‚
-â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-â”‚  Technique Effectiveness        â”‚
-â”‚                                 â”‚
-â”‚  Re-reading (Q1-Q3):           â”‚
-â”‚  Avg mastery gain: +2%/session  â”‚
-â”‚                                 â”‚
-â”‚  Practice Testing (R1-R3):     â”‚
-â”‚  Avg mastery gain: +14%/session â”‚
-â”‚                                 â”‚
-â”‚  ðŸ“ˆ Practice Testing is 7x     â”‚
-â”‚     more effective for you      â”‚
-â”‚                                 â”‚
-â”‚  ðŸ     ðŸ“    ðŸ“–    ðŸ“Š          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-```
+Home shows a smaller learning curve across all modules.
 
-### 8.3 Dashboard Data Sources
-
-| Component | Data Source | Calculation |
-|-----------|-----------|-------------|
-| Learning Curve line | `quizResults` table, ordered by timestamp | Plot mastery % per attempt |
-| Technique color coding | `technique` field on each quiz/review result | Different line color per technique |
-| Inflection point | First record where `technique` changed | Annotated marker on chart |
-| Topic Mastery bars | Latest BKT mastery per topic | Direct from `knowledgeState` table |
-| Technique Effectiveness | Group results by technique â†’ calculate avg mastery delta per session | `(mastery_after - mastery_before) / session_count` per technique |
-| Improvement stat | Compare avg mastery in last 3 sessions of old technique vs first 3 of new | Percentage difference |
+### 8.3 Data Sources
+Quiz and review records (score, technique, source), per-topic mastery (BKT), and review schedules (SM-2). All on the device.
 
 ### 8.4 Technical Implementation
-
-The learning curve is a simple line chart. For MVP, render with pure CSS/HTML (no charting library needed to save bundle size):
-
-```javascript
-// Query all results for this document, ordered by time
-const results = await db.quizResults
-  .where('documentId').equals(docId)
-  .sortBy('timestamp');
-
-// Group by technique for color coding
-const chartData = results.map((r, i) => ({
-  attempt: i + 1,
-  mastery: r.mastery,
-  technique: r.technique,
-  source: r.source, // 'quiz' or 'review'
-  label: r.source === 'quiz' ? `Q${quizCount++}` : `R${reviewCount++}`,
-}));
-
-// Find inflection point
-const techniqueSwitch = chartData.findIndex((d, i) =>
-  i > 0 && d.technique !== chartData[i-1].technique
-);
-```
+Pure functions in `src/services/dashboard/learningCurve.js` and `src/services/home/overview.js`; charts are inline SVG with no chart library.
 
 ---
 
@@ -869,7 +354,7 @@ db.version(1).stores({
 
 ---
 
-## 10. AWS Lambda Endpoints
+## 10. Cloud API Endpoints (Vercel functions)
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
@@ -878,7 +363,8 @@ db.version(1).stores({
 | `/api/quiz` | POST | Tier 2 adaptive MCQ generation |
 | `/api/chat` | POST | Tier 2 RAG chat (if time permits) |
 | `/api/analyze-technique` | POST | Tier 2 study technique analysis |
-| `/api/review-session` | POST | Tier 2 technique-specific question generation |
+| `/api/feynman` | POST | Tier 2 Feynman explanation feedback (coverage, gaps) |
+| `/api/verify-notes` | POST | Tier 2 reference-based note checking |
 
 ### `/api/analyze-technique` â€” NEW
 
@@ -901,7 +387,7 @@ db.version(1).stores({
 }
 ```
 
-### `/api/review-session` â€” NEW
+### `/api/review-session` (not built: review sessions reuse `/api/quiz` and `/api/feynman`) â€” NEW
 
 ```javascript
 // Request
@@ -932,37 +418,42 @@ db.version(1).stores({
 
 ## 11. Brand & Design
 
-### 11.1 Colors (from Brand Guidelines v3.0)
+### 11.1 Colors (design tokens in `src/index.css`)
 
 | Token | Hex | Usage |
 |-------|-----|-------|
-| Primary | #0D7377 | Buttons, headers, links |
-| Primary Dark | #095557 | Hover states |
-| Background | #F8F9FA | Page background |
+| Primary | #1A7DB6 | Buttons, links, active navigation |
+| Primary Hover | #14689A | Hover states |
+| Accent | #41ADE2 | Progress bars, chart line |
+| Background | #F5FAFD | Page background |
 | Surface | #FFFFFF | Cards |
-| Text Primary | #1A1A2E | Body text |
-| Text Secondary | #6B7280 | Captions, labels |
-| Tier Edge (Green) | #16A34A | ðŸŸ¢ On-Device AI badge |
-| Tier Cloud (Blue) | #2563EB | ðŸ”µ Cloud AI badge |
-| Tier Offline (Amber) | #D97706 | ðŸŸ¡ Offline Mode badge |
-| Success | #059669 | Correct answers, mastery gains |
-| Warning | #D97706 | Plateau alerts |
-| Error | #DC2626 | Wrong answers, low mastery |
+| Sky | #DFF2FB | Hero banner, active navigation background |
+| Mint | #E6F2EC | Positive panels, counters |
+| Text Primary | #1B2B44 | Headings and body text |
+| Text Secondary | #5F6F7A | Captions, labels |
+| Success | #3B8A6A | Correct answers, mastery gains |
+| Warning | #FDF0D5 / #7A4E08 | Plateau alerts, technique suggestions |
+| Error | #C9563F | Wrong answers, low mastery |
+
+The tier is always shown as text plus an icon, never by color alone. A dark
+appearance redefines the same tokens.
 
 ### 11.2 Typography
-- Font: Inter (system fallback: system-ui, sans-serif)
-- Body: 14px minimum
-- Headings: 18-24px, font-weight 600
+- Headings: Georgia (serif), bold. Body: Segoe UI / system-ui (sans-serif)
+- System fonts only, so nothing is downloaded and the app works offline
+- Body: 14px minimum; page titles 30px, section titles 19px
 - Touch targets: 48px minimum height
-- Card border radius: 12px
-- Screen padding: 16px
+- Card border radius: 18px (large panels 24–28px)
+- Screen padding: 16px on phones
 
 ### 11.3 Design Principles
-- Mobile-first (target: Samsung Galaxy A13, 6.6" screen)
-- No dark mode (MVP)
-- No animations beyond essential transitions
-- No gamification (no streaks, badges, avatars)
-- Tier badge always visible â€” transparency about what's powering the experience
+- Mobile-first (target: Samsung Galaxy A13, 6.6" screen), with a side-menu layout on wide screens
+- Light appearance by default; an optional dark appearance in Profile
+- Short, light animations (screens rise in, flashcards flip, answers pop or shake, the mascot floats). All motion is off when the device asks for reduced motion
+- Light motivation only: a study streak, study time and topics mastered. No badges, points, leaderboards or avatars
+- Mascot and logo: the Study Bunny (`public/mascot.png`, `public/logo.png`)
+- Simple wording everywhere: short sentences, no jargon, summaries capped at three key points
+- Tier badge always visible on AI results — transparency about what's powering the experience
 
 ---
 
@@ -973,20 +464,20 @@ db.version(1).stores({
 **Home:**
 - [ ] PDF upload â†’ text extraction â†’ chunking â†’ IndexedDB
 - [ ] Document library with mastery preview
-- [ ] Tier detection + badge on all screens
+- [ ] Tier detection + badge on every AI-powered result
 
 **Quiz:**
 - [ ] Pre-quiz technique survey (first time per document)
-- [ ] 5-question adaptive quiz (Tier 3: fill-blank + T/F; Tier 2: Bedrock MCQ)
+- [ ] 5-question adaptive quiz (Tier 3: fill-blank + T/F; Tier 2: Cloud AI MCQ)
 - [ ] BKT mastery update after each answer
 - [ ] Quiz results with topic mastery bars
-- [ ] Post-quiz technique diagnosis (Tier 3: rule-based; Tier 2: Bedrock analysis)
+- [ ] Post-quiz technique diagnosis (Tier 3: rule-based; Tier 2: Cloud AI analysis)
 - [ ] CTA to Review Mode with recommended technique
 
 **Review:**
 - [ ] Technique selection screen (with AI recommendation highlighted)
 - [ ] Module selection screen (with weak topics shown)
-- [ ] Practice Testing session (5 recall questions from weak topics)
+- [ ] Flashcard review session (weakest topics first), rated Again / Hard / Good / Easy
 - [ ] Session results with mastery update
 - [ ] Results tagged with technique + source for Dashboard
 
@@ -997,8 +488,8 @@ db.version(1).stores({
 - [ ] Technique effectiveness comparison
 
 **Infrastructure:**
-- [ ] Lambda deployed with /health, /quiz, /analyze-technique, /review-session
-- [ ] Amplify deployment with live URL
+- [ ] Vercel functions deployed: /health, /summarize, /quiz, /chat, /feynman, /analyze-technique, /verify-notes (optional — the app is complete offline)
+- [ ] Vercel deployment with live URL
 - [ ] PWA manifest + service worker
 - [ ] Airplane mode demo works end-to-end
 
@@ -1008,14 +499,14 @@ db.version(1).stores({
 - [ ] Spaced Retrieval scheduling
 - [ ] Summary generation (Tier 2 + Tier 3)
 - [ ] RAG Chat
-- [ ] Tier 2 technique analysis (Bedrock-powered)
+- [ ] Tier 2 technique analysis (Cloud AI-powered)
 
 ### Won't Have (Post-Hackathon) âŒ
 
 - Elaborative Interrogation
 - Interleaved Practice
 - Mind Mapping
-- Push notifications
+- Push notifications (a once-a-day local reminder when the app is open is included; background push is not)
 - User accounts
 - Cloud sync
 - Tier 1 (on-device SLM)
@@ -1028,7 +519,7 @@ db.version(1).stores({
 |-----|------|---------------|
 | **Dev 1 (Lead)** | `/src/core/`, `/src/db/`, `/src/services/tierDetection.js` | Scaffold, DB schema, PDF processor, tier detection, integration wiring |
 | **Dev 2** | `/src/services/quiz/`, `/src/services/bkt.js`, `/src/services/techniqueEngine.js` | RAKE, TF-IDF, quiz generation (both tiers), BKT engine, technique recommendation engine |
-| **Dev 3** | `/lambda/`, `/src/api/`, `/src/services/review/` | Lambda deployment, all Bedrock endpoints, review session generation, Tier 2 technique analysis |
+| **Dev 3** | `/api/`, `/cloud-api/`, `/src/services/review/` | Vercel function deployment, all Cloud AI endpoints, review session generation, Tier 2 technique analysis |
 | **Dev 4** | `/src/pages/`, `/src/components/` | All UI: Home, Quiz flow, Review flow, Dashboard, learning curve chart, navigation |
 
 ---
@@ -1038,13 +529,13 @@ db.version(1).stores({
 **Project Name:** Study Bunny
 
 **Project Overview (â‰¤200 words):**
-Study Bunny is a free, offline-first PWA that turns uploaded PDF notes into adaptive quizzes, diagnoses study techniques, and recommends evidence-based learning methods â€” all on a budget phone with no internet. The app uses a three-tier architecture: Amazon Bedrock (Claude 3 Haiku) for best-quality AI when online, and deterministic algorithms (RAKE, TF-IDF, BKT) when offline. Students upload their course notes, take adaptive quizzes powered by Bayesian Knowledge Tracing, see their learning curve over time, and receive personalized recommendations to switch from ineffective study habits (like re-reading) to evidence-based techniques (like practice testing). A dedicated Review Mode lets students apply specific learning techniques to their materials with guided study sessions. Built for the 17.4 million Filipino students without reliable internet, where ChatGPT Plus costs more than a student's entire monthly allowance.
+Study Bunny is a free, offline-first PWA that turns uploaded PDF notes into adaptive quizzes, diagnoses study techniques, and recommends evidence-based learning methods â€” all on a budget phone with no internet. The app uses a three-tier architecture: an optional hosted AI model for best-quality answers when online, and deterministic algorithms (RAKE, TF-IDF, BKT) when offline. Students upload their course notes, take adaptive quizzes powered by Bayesian Knowledge Tracing, see their learning curve over time, and receive personalized recommendations to switch from ineffective study habits (like re-reading) to evidence-based techniques (like practice testing). A dedicated Review Mode lets students apply specific learning techniques to their materials with guided study sessions. Built for the 17.4 million Filipino students without reliable internet, where ChatGPT Plus costs more than a student's entire monthly allowance.
 
 **Pain Point:**
 Filipino students face compounding barriers: 91% learning poverty, 51% without internet, and AI tools that cost â‚±1,120/month against a â‚±1,235 average allowance. Even students who CAN study often use ineffective techniques â€” 84% default to re-reading, the least effective method. The students who need AI the most are locked out of it, and those who study do it wrong.
 
 **Solution:**
-An offline-first PWA with three-tier AI (Bedrock â†’ on-device â†’ deterministic fallback) that provides adaptive quizzes, learning curve tracking, study technique diagnosis, and guided review sessions â€” all from the student's own uploaded notes, for free, on any device.
+An offline-first PWA with three-tier AI (hosted model â†’ on-device â†’ deterministic fallback) that provides adaptive quizzes, learning curve tracking, study technique diagnosis, and guided review sessions â€” all from the student's own uploaded notes, for free, on any device.
 
 **Tech Stack:**
-React 18, Vite, Tailwind CSS, Dexie.js (IndexedDB), PDF.js, RAKE (pure JS), TF-IDF (pure JS), BKT (pure JS), Amazon Bedrock (Claude 3 Haiku), AWS Lambda, API Gateway, AWS Amplify, Kiro IDE, Amazon Quick.
+React 18, Vite, Tailwind CSS, Dexie.js (IndexedDB), PDF.js, RAKE (pure JS), TF-IDF (pure JS), BKT (pure JS), a hosted AI model (Gemini, Groq, OpenAI or Claude, switchable), Vercel serverless functions, Vercel hosting, Kiro IDE, Amazon Quick.

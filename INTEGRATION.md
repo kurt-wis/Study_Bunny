@@ -23,15 +23,17 @@ sanitized snapshots, not automatically refreshed when notes change.
 
 ## Cloud transport
 
-`apiPost()` requires all four public cloud variables, consent, online status, and
-a non-expired access token. It redacts content strings and sends a Bearer access
-token. Health requires JSON `{ status: "ok" }`, not merely HTTP 200. Tier resolution
-checks eligibility before health. Features fall back to their deterministic path
-on cloud failure. No on-device model is bundled; the edge registry is empty.
+`apiPost()` requires consent, online status and a saved access code. It redacts
+content strings and sends the code in the `X-Study-Bunny-Code` header to the
+app's own `/api` routes (same origin; `VITE_API_BASE_URL` is optional). Health
+requires JSON `{ status: "ok" }`, not merely HTTP 200, and the server reports ok
+only when its AI provider, key, model and access code are all set. Tier resolution checks
+eligibility before health. Features fall back to their deterministic path on
+cloud failure. No on-device model is bundled; the edge registry is empty.
 
-All six AI POST routes use the `study-bunny/study` scope and shared daily quota.
-See `cloud-api/README.md`. Vercel has no same-origin API; the service worker does
-not cache API responses or OAuth callbacks.
+All six AI POST routes check the access code and origin and share one daily
+limit per device (access code + IP address). See `cloud-api/README.md`. The
+service worker does not cache API responses.
 
 ## Verification contract
 
@@ -76,7 +78,7 @@ reference-based approach agreed in chat, not an authoritative truth detector.
 
 ## Hosting
 
-Vercel serves `dist` with targeted student/auth rewrites and security headers.
-AWS hosts sign-in/API. Icons are generated from committed code before each build;
+Vercel serves `dist` with targeted student rewrites and security headers, and
+runs the optional AI routes as serverless functions in `/api`. Install icons are committed files made from the logo;
 PDF.js and its worker are locally precached. See `DEPLOYMENT.md` for requirements,
 environment variables, rollout, limitations and live release gates.

@@ -6,6 +6,8 @@ import { getChunkRecords } from '../../utils/chunkRecords.js';
 import { resolveTier, TIER } from '../../utils/tierDetection.js';
 import { apiPost } from '../../utils/apiTransport.js';
 import TierBadge from '../../components/shared/TierBadge.jsx';
+import PageHeader from '../../components/layout/PageHeader.jsx';
+import Icon from '../../components/Icon.jsx';
 import LoadingSpinner from '../../components/shared/LoadingSpinner.jsx';
 
 const NOT_FOUND_RESPONSE = "I couldn't find an answer to that in your notes. Try rephrasing, or check if the topic is covered in your document.";
@@ -97,13 +99,13 @@ export default function StudentChat() {
           // the resolver, and reflect the effective tier as Offline mode.
           console.error('[Chat] Cloud failed, using Tier 3 retrieval');
           effectiveTier = TIER.DETERMINISTIC;
-          answer = topRecords.length > 0 ? formatTier3Response(topRecords) : NOT_FOUND_RESPONSE;
+          answer = topRecords.length > 0 ? formatTier3Response(topRecords, question, doc) : NOT_FOUND_RESPONSE;
           citations = topRecords.map(r => r.chunkId);
         }
       } else {
         // Tier 3: return top matching passages, no generated prose.
         effectiveTier = TIER.DETERMINISTIC;
-        answer = topRecords.length > 0 ? formatTier3Response(topRecords) : NOT_FOUND_RESPONSE;
+        answer = topRecords.length > 0 ? formatTier3Response(topRecords, question, doc) : NOT_FOUND_RESPONSE;
         citations = topRecords.map(r => r.chunkId);
       }
 
@@ -120,36 +122,44 @@ export default function StudentChat() {
     }
   }
 
-  function formatTier3Response(topRecords) {
+  function formatTier3Response(topRecords, question, sourceDoc) {
     if (topRecords.length === 0) return NOT_FOUND_RESPONSE;
-    const passages = topRecords.slice(0, 3).map((r, i) => {
-      const where = r.page ? ` (from your notes, page ${r.page})` : ' (from your notes)';
-      return `**Passage ${i + 1}**${where}:\n"${r.text.slice(0, 300)}${r.text.length > 300 ? '…' : ''}"`;
+    // Offline answers quote the exact lines of the notes that match the
+    // question, instead of long passages. No text is generated.
+    const lineText = typeof sourceDoc?.lineText === 'string' && sourceDoc.lineText.trim() ? sourceDoc.lineText : null;
+    const lines = (lineText ? lineText.split('\n') : (String(sourceDoc?.rawText ?? '').match(/[^.!?]+[.!?]+/g) ?? []))
+      .map(l => l.replace(/\t/g, ' - ').replace(/\s+/g, ' ').trim())
+      .filter(l => l.split(' ').length >= 3);
+    const hits = question ? tfidfSearch(question, lines, 3).filter(h => h.score > 0) : [];
+    if (hits.length > 0) {
+      return `Your notes say:\n\n${hits.map(h => `• ${h.text}`).join('\n')}`;
+    }
+    const passages = topRecords.slice(0, 2).map(r => {
+      const where = r.page ? ` (page ${r.page})` : '';
+      return `From your notes${where}:\n"${r.text.slice(0, 300)}${r.text.length > 300 ? '…' : ''}"`;
     });
-    return `Here are the most relevant passages from your notes:\n\n${passages.join('\n\n')}`;
+    return passages.join('\n\n');
   }
 
   if (initLoading) return <div className="p-6"><LoadingSpinner /></div>;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-2xl mx-auto px-4 h-14 flex items-center gap-3">
-          <button onClick={() => navigate(`/student/document/${docId}`)} className="text-gray-400 hover:text-gray-600 text-xl min-h-[48px] min-w-[48px] flex items-center justify-center">‹</button>
-          <div className="flex-1">
-            <h1 className="font-bold text-gray-800">💬 Ask My Notes</h1>
-            {currentTier && <TierBadge tier={currentTier} />}
-          </div>
-        </div>
-      </header>
+      <PageHeader
+        eyebrow="Answers come only from your notes"
+        title="Ask my notes"
+        onBack={() => navigate(`/student/document/${docId}`)}
+        backLabel="Back to document"
+        right={currentTier ? <TierBadge tier={currentTier} /> : null}
+      />
 
       {/* Messages */}
-      <main className="flex-1 max-w-2xl w-full mx-auto px-4 py-4 overflow-y-auto">
+      <main className="flex-1 max-w-[816px] w-full mx-auto px-4 sm:px-8 py-4">
         {history.length === 0 && (
-          <div className="text-center py-12 text-gray-400">
-            <div className="text-4xl mb-3">💭</div>
+          <div className="text-center py-12 sb-muted">
+            <span className="sb-tile mx-auto mb-3" style={{ background: 'var(--sb-sky)', color: 'var(--sb-primary)' }}><Icon name="chat" /></span>
             <p>Ask anything about your notes</p>
-            <p className="text-sm mt-1 text-gray-300">e.g. "What is the main argument?" or "Explain the key concept"</p>
+            <p className="text-sm mt-1">e.g. "What is the main argument?" or "Explain the key concept"</p>
           </div>
         )}
 
@@ -157,7 +167,7 @@ export default function StudentChat() {
           {history.map((msg, i) => {
             const notFound = msg.role === 'assistant' && msg.content === NOT_FOUND_RESPONSE;
             return (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div key={i} className={`flex sb-enter ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
                 role={notFound ? 'alert' : undefined}
                 className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
@@ -191,24 +201,25 @@ export default function StudentChat() {
       </main>
 
       {/* Input */}
-      <div className="bg-white border-t border-gray-200 sticky bottom-0">
-        <div className="max-w-2xl mx-auto px-4 py-3 flex gap-2">
+      <div className="sticky bottom-[92px] lg:bottom-0 z-10" style={{ background: 'var(--sb-bg)' }}>
+        <div className="max-w-[816px] mx-auto px-4 sm:px-8 py-3 flex gap-2">
           <input
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
             placeholder="Ask about your notes..."
-            className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-300 min-h-[48px]"
+            className="sb-input flex-1" style={{ minHeight: 48 }}
+            aria-label="Your question"
             disabled={loading}
           />
           <button
             onClick={sendMessage}
             disabled={!input.trim() || loading}
-            className="bg-indigo-600 disabled:bg-gray-100 text-white disabled:text-gray-300 rounded-xl px-4 font-semibold text-sm transition-colors min-h-[48px] min-w-[48px]"
+            className="sb-btn" style={{ padding: '0 16px' }}
             aria-label="Send message"
           >
-            →
+            <Icon name="send" />
           </button>
         </div>
       </div>

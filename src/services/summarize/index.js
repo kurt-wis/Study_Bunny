@@ -2,8 +2,8 @@
  * Summarize orchestrator — routes to correct tier and caches results.
  */
 import { resolveTier, TIER } from '../../utils/tierDetection.js';
-import { summarizeTier3 } from './summarizeTier3.js';
-import { saveSummary, getSummary, getDocument } from '../../db/database.js';
+import { summarizeTier3, SUMMARY_VERSION } from './summarizeTier3.js';
+import db, { saveSummary, getSummary, getDocument } from '../../db/database.js';
 import { getChunkRecords } from '../../utils/chunkRecords.js';
 
 /**
@@ -17,8 +17,11 @@ export async function summarize(documentId, opts = {}) {
   const { tier } = await resolveTier({ feature: 'summarize', preference: opts.preference ?? null });
 
   // Check cache first
+  // Reuse the cached summary unless a fresh one was asked for (`opts.force`)
+  // or it was made in the older, longer format.
   const cached = await getSummary(documentId, tier);
-  if (cached) return cached;
+  if (cached && !opts.force && cached.content?.version === SUMMARY_VERSION) return cached;
+  if (cached) await db.summaries.delete(cached.id);
 
   const doc = await getDocument(documentId);
   if (!doc) throw new Error('Document not found');
@@ -31,7 +34,7 @@ export async function summarize(documentId, opts = {}) {
       result = await summarizeTier2(doc.rawText, getChunkRecords(doc));
     } catch (error) {
       console.error('[Summarize] Cloud tier failed, falling back to deterministic:', error);
-      result = await summarizeTier3(doc.rawText);
+      result = await summarizeTier3(doc.lineText || doc.rawText, { items: doc.items });
     }
   } else if (tier === TIER.EDGE) {
     try {
@@ -39,10 +42,10 @@ export async function summarize(documentId, opts = {}) {
       result = await summarizeTier1(doc.rawText, doc.chunks);
     } catch (error) {
       console.error('[Summarize] Edge tier failed, falling back to deterministic:', error);
-      result = await summarizeTier3(doc.rawText);
+      result = await summarizeTier3(doc.lineText || doc.rawText, { items: doc.items });
     }
   } else {
-    result = await summarizeTier3(doc.rawText);
+    result = await summarizeTier3(doc.lineText || doc.rawText, { items: doc.items });
   }
 
   // Persist result to cache

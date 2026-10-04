@@ -5,7 +5,6 @@
   "type": "module",
   "engines": { "node": "24.x" },
   "scripts": {
-    "predev": "node scripts/generate-icons.mjs",
     "dev": "vite",
     "build": "vite build",
     "prebuild": "node scripts/generate-icons.mjs",
@@ -17,7 +16,6 @@
   "dependencies": {
     "dexie": "4.0.8",
     "pdfjs-dist": "6.4.299",
-    "oidc-client-ts": "3.5.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-router-dom": "7.18.4"

@@ -1,11 +1,12 @@
 /**
  * ApiTransport — shared HTTP client for cloud API calls.
- * The client never holds or transmits AWS credentials.
- * The API_BASE_URL is a deployment config value, not a secret.
+ * The client never holds an AI provider key: requests go to this site's own
+ * /api routes, which add the key on the server. VITE_API_BASE_URL is optional
+ * and only needed when the API is hosted on a different origin.
  */
 
 import { sanitizePayload } from '../../cloud-api/src/lib/privacy.js';
-import { cloudEnabled, getAccessToken } from './cloudSession.js';
+import { cloudEnabled, getAccessCode } from './cloudSession.js';
 
 const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 const DEFAULT_TIMEOUT_MS = 28_000;
@@ -29,15 +30,15 @@ class ApiError extends Error {
  * @returns {Promise<object>} parsed JSON response
  */
 export async function apiPost(path, body, timeoutMs = DEFAULT_TIMEOUT_MS) {
-  if (!await cloudEnabled()) throw new ApiError('Enable Cloud AI and sign in first.', 401);
-  const token = await getAccessToken();
+  if (!await cloudEnabled()) throw new ApiError('Turn on Cloud AI and enter your access code first.', 401);
+  const code = await getAccessCode();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', 'X-Study-Bunny-Code': code },
       body: JSON.stringify(sanitizePayload(body)),
       signal: controller.signal,
     });
@@ -68,7 +69,6 @@ export async function apiPost(path, body, timeoutMs = DEFAULT_TIMEOUT_MS) {
  * Returns true only for a successful JSON liveness response.
  */
 export async function apiHealthCheck(timeoutMs = 5_000) {
-  if (!API_BASE_URL) return false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

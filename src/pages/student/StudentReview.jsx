@@ -4,16 +4,24 @@ import { TECHNIQUES } from '../../services/techniqueEngine.js';
 import {
   startSession,
   recordAnswer,
-  CONFIDENCE_RATINGS,
+  previewIntervals,
+  REVIEW_GRADES,
 } from '../../services/spacedRepetition/index.js';
 import { evaluateFeynman, FEYNMAN_SELF_RATINGS } from '../../services/feynman/index.js';
+import { canonical } from '../../services/feynman/feynmanTier3.js';
 import { tfidfSearch } from '../../utils/tfidf.js';
 import {
   getAllDocuments,
   getDocument,
   getKnowledgeState,
   tagQuizSource,
+  updateQuizScore,
+  setSetting,
 } from '../../db/database.js';
+import { diagnose, shouldDiagnose } from '../../services/diagnosis/index.js';
+import { playTone } from '../../utils/preferences.js';
+import useStudyTimer from '../../hooks/useStudyTimer.js';
+import Icon from '../../components/Icon.jsx';
 import PomodoroTimer from '../../components/PomodoroTimer.jsx';
 import TierBadge from '../../components/shared/TierBadge.jsx';
 import LoadingSpinner from '../../components/shared/LoadingSpinner.jsx';
@@ -56,21 +64,42 @@ const WEAK_MASTERY_THRESHOLD = 0.6;
 const REVIEW_TECHNIQUES = ['spaced_repetition', 'feynman', 'pomodoro'];
 
 const TECHNIQUE_META = {
-  spaced_repetition: { icon: '🔁', blurb: 'Resurface due topics and rate your confidence.' },
-  feynman: { icon: '🗣️', blurb: 'Explain a topic from memory, then see the gaps.' },
-  pomodoro: { icon: '⏱️', blurb: 'Review in a timed focus block.' },
+  spaced_repetition: { icon: <Icon name="flip" />, bestFor: 'Best for remembering', blurb: 'Short flashcard reviews, spread over days.' },
+  feynman: { icon: <Icon name="speak" />, bestFor: 'Best for understanding', blurb: 'Explain a topic in your own words, then compare with your notes.' },
+  pomodoro: { icon: <Icon name="timer" />, bestFor: 'Best for focus', blurb: 'Flashcards with a 25-minute focus timer.' },
 };
 
-const CONFIDENCE_LABELS = {
-  got_it: { label: 'Got it', icon: '✅' },
-  partial: { label: 'Partially', icon: '🤔' },
-  missed_it: { label: 'Missed it', icon: '❌' },
-};
+/** "Skip" choice on the technique step: a normal flashcard review, no technique. */
+const FLASHCARDS = 'flashcards';
+
+function techniqueLabel(key) {
+  return key === FLASHCARDS ? 'Flashcards' : (TECHNIQUES[key]?.name ?? 'Review');
+}
+
+function tokensOf(list) {
+  const out = new Set();
+  for (const item of list ?? []) {
+    for (const w of String(item).toLowerCase().split(/[^a-z0-9]+/)) if (w.length >= 3) out.add(canonical(w));
+  }
+  return out;
+}
+
+/** Text with covered key ideas marked green and missing ones underlined. */
+function Highlighted({ text, covered, missing }) {
+  const ok = tokensOf(covered);
+  const miss = tokensOf(missing);
+  return String(text ?? '').split(/([A-Za-z0-9]+)/).map((part, i) => {
+    const key = canonical(part);
+    if (ok.has(key)) return <mark key={i} className="sb-mark-ok">{part}</mark>;
+    if (miss.has(key)) return <mark key={i} className="sb-mark-miss">{part}</mark>;
+    return part;
+  });
+}
 
 const SELF_RATING_LABELS = {
-  got_it: { label: 'Got it', icon: '✅' },
-  partial: { label: 'Partially', icon: '🤔' },
-  missed: { label: 'Missed it', icon: '❌' },
+  got_it: { label: 'Got it', icon: null },
+  partial: { label: 'Partially', icon: null },
+  missed: { label: 'Missed it', icon: null },
 };
 
 /** Pull the per-topic mastery out of a knowledgeState entry (object or bare number). */
@@ -102,7 +131,8 @@ export default function StudentReview() {
 
   // ── Stepper state ──────────────────────────────────────────────────────────
   // technique → document → session. A valid `?technique=` skips step 1.
-  const [step, setStep] = useState(presetTechnique ? 'document' : 'technique');
+  const autoStart = searchParams.get('start') === '1' && presetTechnique != null && !Number.isNaN(docId);
+  const [step, setStep] = useState(autoStart ? 'session' : presetTechnique ? 'document' : 'technique');
   const [technique, setTechnique] = useState(presetTechnique);
   const [selectedDocId, setSelectedDocId] = useState(Number.isNaN(docId) ? null : docId);
 
@@ -150,6 +180,7 @@ export default function StudentReview() {
 
   function pickDocument(chosenId) {
     setSelectedDocId(chosenId);
+    setSetting('lastDocumentId', chosenId).catch(() => {});
     setStep('session');
   }
 
@@ -167,34 +198,28 @@ export default function StudentReview() {
 
   // ── Header (shared across steps) ─────────────────────────────────────────────
   const header = (
-    <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-      <div className="max-w-2xl mx-auto px-4 h-14 flex items-center gap-3">
-        <button
-          onClick={() => {
-            if (step === 'session') backToDocument();
-            else if (step === 'document' && !presetTechnique) backToTechnique();
-            else navigate(headerBackTarget);
-          }}
-          className="text-gray-500 hover:text-gray-700 text-xl min-h-[48px] min-w-[48px] flex items-center justify-center"
-          aria-label="Back"
-        >
-          ‹
-        </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="font-bold text-gray-800">Review</h1>
-          {technique && (
-            <p className="text-xs text-gray-500 truncate">
-              {TECHNIQUE_META[technique]?.icon} {TECHNIQUES[technique]?.name}
-            </p>
-          )}
-        </div>
-      </div>
+    <header className="max-w-[816px] mx-auto px-4 sm:px-8 pt-6 flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => {
+          if (step === 'session') backToDocument();
+          else if (step === 'document' && !presetTechnique) backToTechnique();
+          else navigate(headerBackTarget);
+        }}
+        className="sb-icon-btn -ml-3"
+        aria-label="Back"
+      >
+        <Icon name="back" />
+      </button>
+      <p className="sb-eyebrow truncate">
+        Review{technique ? ` · ${techniqueLabel(technique)}` : ''}
+      </p>
     </header>
   );
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div>
         {header}
         <main className="max-w-2xl mx-auto px-4 py-8">
           <LoadingSpinner message="Loading your review..." />
@@ -204,9 +229,9 @@ export default function StudentReview() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div>
       {header}
-      <main className="max-w-2xl mx-auto px-4 py-6">
+      <main key={step} className="max-w-[816px] mx-auto px-4 sm:px-8 pt-3 pb-8 sb-enter">
         {error && <div className="mb-4"><ErrorMessage message={error} /></div>}
 
         {/* ── Step 1: technique pick (recommendation highlighted) (Req 5.1) ──── */}
@@ -220,6 +245,7 @@ export default function StudentReview() {
             docs={docs}
             weakByDoc={weakByDoc}
             defaultDocId={Number.isNaN(docId) ? null : docId}
+            techniqueLabel={techniqueLabel(technique)}
             onPick={pickDocument}
           />
         )}
@@ -245,13 +271,12 @@ export default function StudentReview() {
 
 function TechniqueStep({ recommended, onPick }) {
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="font-bold text-gray-800 text-lg">Pick a technique</h2>
-        <p className="text-sm text-gray-500">
-          Choose how you want to review. We’ll tailor the session to it.
-        </p>
-      </div>
+    <div className="flex flex-col gap-4">
+      <header>
+        <p className="sb-eyebrow">Step 1 of 2</p>
+        <h1 className="sb-title mt-1.5">How do you want to review?</h1>
+        <p className="sb-sub mt-1">Pick one way to study. Next, you will choose the module or handout.</p>
+      </header>
       <div className="grid gap-3" role="group" aria-label="Review techniques">
         {REVIEW_TECHNIQUES.map(key => {
           const meta = TECHNIQUE_META[key];
@@ -261,58 +286,55 @@ function TechniqueStep({ recommended, onPick }) {
               key={key}
               type="button"
               onClick={() => onPick(key)}
-              className={`text-left p-4 rounded-2xl border-2 transition-all min-h-[48px] ${
-                isRecommended
-                  ? 'border-amber-400 bg-amber-50'
-                  : 'border-gray-200 bg-white hover:border-indigo-300'
-              }`}
+              className="sb-card flex items-center gap-4 p-4 text-left"
+              style={isRecommended ? { borderColor: 'var(--sb-accent)', background: 'var(--sb-sky-soft)' } : undefined}
             >
-              <div className="flex items-center gap-2">
-                <span className="text-2xl" aria-hidden="true">{meta.icon}</span>
-                <span className="font-semibold text-gray-800">{TECHNIQUES[key].name}</span>
-                {isRecommended && (
-                  <span className="ml-auto text-xs font-bold text-amber-700 bg-amber-100 px-2 py-1 rounded-full">
-                    ★ Recommended
-                  </span>
-                )}
-              </div>
-              <p className="text-sm text-gray-500 mt-1">{meta.blurb}</p>
+              <span className="sb-tile" style={{ background: 'var(--sb-sky)', color: 'var(--sb-primary)' }} aria-hidden="true">{meta.icon}</span>
+              <span className="flex-1 min-w-0">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold">{TECHNIQUES[key].name}</span>
+                  <span className="sb-chip">{meta.bestFor}</span>
+                  {isRecommended && <span className="sb-chip" style={{ background: 'var(--sb-amber-bg)', color: 'var(--sb-amber-ink)' }}>Suggested for you</span>}
+                </span>
+                <span className="block sb-sub mt-0.5">{meta.blurb}</span>
+              </span>
+              <Icon name="chevron" size={18} className="sb-muted" />
             </button>
           );
         })}
+      </div>
+      <div className="sb-card flex flex-wrap items-center gap-3 p-4" style={{ background: 'var(--sb-surface-soft)' }}>
+        <div className="flex-1 basis-[220px]">
+          <div className="font-bold">Not sure?</div>
+          <p className="sb-sub">Skip this and do a normal review with flashcards.</p>
+        </div>
+        <button type="button" onClick={() => onPick(FLASHCARDS)} className="sb-btn-ghost">Skip, use flashcards</button>
       </div>
     </div>
   );
 }
 
-/* ───────────────────────────── Step 2: document ──────────────────────────── */
+/* ───────────────────────────── Step 2: module / handout ───────────────────── */
 
-function DocumentStep({ docs, weakByDoc, defaultDocId, onPick }) {
+function DocumentStep({ docs, weakByDoc, defaultDocId, onPick, techniqueLabel }) {
   if (docs.length === 0) {
     return (
-      <div className="bg-white rounded-2xl p-8 text-center border border-gray-100 shadow-sm">
-        <div className="text-5xl mb-3" aria-hidden="true">📄</div>
-        <h2 className="font-bold text-gray-800 mb-1">No documents yet</h2>
-        <p className="text-gray-500 text-sm">
-          Upload some notes and take a quiz first, then come back to review.
-        </p>
-        <Link
-          to="/student"
-          className="mt-4 inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5 py-3 rounded-xl min-h-[48px] transition-colors"
-        >
-          Go to my documents
-        </Link>
+      <div className="sb-card rounded-3xl px-6 py-10 text-center">
+        <h2 className="sb-display text-[21px] mb-1">No modules yet</h2>
+        <p className="sb-sub">Upload a module or handout on Home first, then come back to review.</p>
+        <Link to="/student" className="sb-btn mt-5">Go to Home</Link>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="font-bold text-gray-800 text-lg">Pick a document</h2>
-        <p className="text-sm text-gray-500">Weak topics (below 60% mastery) are shown so you can focus.</p>
-      </div>
-      <div className="space-y-3">
+    <div className="flex flex-col gap-4">
+      <header>
+        <p className="sb-eyebrow">Step 2 of 2 · {techniqueLabel}</p>
+        <h1 className="sb-title mt-1.5">Which module or handout?</h1>
+        <p className="sb-sub mt-1">Topics you are still weak in are shown under each one.</p>
+      </header>
+      <div className="grid gap-3">
         {docs.map(d => {
           const weak = weakByDoc[d.id] ?? [];
           const isDefault = d.id === defaultDocId;
@@ -321,34 +343,24 @@ function DocumentStep({ docs, weakByDoc, defaultDocId, onPick }) {
               key={d.id}
               type="button"
               onClick={() => onPick(d.id)}
-              className={`w-full text-left p-4 rounded-2xl border-2 transition-all min-h-[48px] ${
-                isDefault
-                  ? 'border-indigo-300 bg-indigo-50/40'
-                  : 'border-gray-200 bg-white hover:border-indigo-300'
-              }`}
+              className="sb-card p-4 text-left"
+              style={isDefault ? { borderColor: 'var(--sb-accent)' } : undefined}
             >
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-gray-800 truncate">{d.title}</span>
-                {isDefault && (
-                  <span className="ml-auto shrink-0 text-xs text-indigo-600 font-medium">Current</span>
-                )}
-              </div>
+              <span className="flex items-center gap-2">
+                <span className="font-bold truncate">{d.title}</span>
+                {isDefault && <span className="sb-chip ml-auto shrink-0">Current</span>}
+              </span>
               {weak.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5 mt-2" aria-label="Weak topics">
+                <span className="flex flex-wrap gap-1.5 mt-2" aria-label="Weak topics">
                   {weak.slice(0, 4).map(t => (
-                    <span
-                      key={t.topic}
-                      className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded-full"
-                    >
+                    <span key={t.topic} className="sb-chip" style={{ background: 'var(--sb-coral-bg)', color: 'var(--sb-coral-ink)' }}>
                       {t.topic} · {Math.round(t.mastery * 100)}%
                     </span>
                   ))}
-                  {weak.length > 4 && (
-                    <span className="text-xs text-gray-500 px-1 py-1">+{weak.length - 4} more</span>
-                  )}
-                </div>
+                  {weak.length > 4 && <span className="text-xs sb-muted py-1">+{weak.length - 4} more</span>}
+                </span>
               ) : (
-                <p className="text-xs text-gray-500 mt-1">No weak topics — review to stay sharp.</p>
+                <span className="block text-xs sb-muted mt-1">No weak topics yet. Review to stay sharp.</span>
               )}
             </button>
           );
@@ -358,12 +370,35 @@ function DocumentStep({ docs, weakByDoc, defaultDocId, onPick }) {
   );
 }
 
+/* ── "Try another technique" suggestion, shown when a session went poorly ──── */
+
+function TechniqueSuggestion({ suggestion }) {
+  if (!suggestion || suggestion.action !== 'switch') return null;
+  return (
+    <section className="rounded-[18px] p-5" style={{ background: 'var(--sb-amber-bg)' }} role="status" aria-live="polite">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <h3 className="sb-display text-base" style={{ color: 'var(--sb-amber-ink)' }}>Try a different way to study</h3>
+        <TierBadge tier={suggestion.tier} />
+      </div>
+      <p className="text-sm sb-ink leading-relaxed">{suggestion.reason}</p>
+      {suggestion.evidence && <p className="text-xs sb-body mt-2">{suggestion.evidence}</p>}
+      {suggestion.expectedImprovement && <p className="text-xs sb-body mt-2">{suggestion.expectedImprovement}</p>}
+      {suggestion.cta && (
+        <Link to={suggestion.cta.to} reloadDocument className="sb-btn mt-4 w-full">
+          {suggestion.cta.label} <Icon name="arrow" />
+        </Link>
+      )}
+    </section>
+  );
+}
+
 /* ───────────────────────────── Step 3: session ───────────────────────────── */
 
 function ReviewSession({ documentId, technique, initialTopic, weakTopics, onExit, onDashboard }) {
   // Pomodoro is a *modifier*: it wraps an underlying session (defaults to the
   // Spaced-Repetition quiz) in the timer overlay (design §6).
-  const underlying = technique === 'pomodoro' ? 'spaced_repetition' : technique;
+  // Flashcards (the skip choice) and Spaced Repetition share the flashcard session.
+  const underlying = technique === 'feynman' ? 'feynman' : 'spaced_repetition';
   const withPomodoro = technique === 'pomodoro';
 
   return (
@@ -372,7 +407,7 @@ function ReviewSession({ documentId, technique, initialTopic, weakTopics, onExit
       {underlying === 'spaced_repetition' ? (
         <SpacedRepetitionSession
           documentId={documentId}
-          technique={technique}
+          technique={technique === FLASHCARDS ? null : technique}
           onExit={onExit}
           onDashboard={onDashboard}
         />
@@ -389,19 +424,35 @@ function ReviewSession({ documentId, technique, initialTopic, weakTopics, onExit
   );
 }
 
-/* ── Spaced Repetition review session (quiz-shaped + confidence) ───────────── */
+/* ── Spaced Repetition review session (flashcards + Again/Hard/Good/Easy) ──── */
+
+const GRADE_META = {
+  again: { label: 'Again', dot: '#C9563F' },
+  hard: { label: 'Hard', dot: '#B7791F' },
+  good: { label: 'Good', dot: '#3B8A6A' },
+  easy: { label: 'Easy', dot: '#5B53C6' },
+};
+
+function intervalLabel(days) {
+  if (!Number.isFinite(days)) return '';
+  return days === 1 ? '1 day' : `${days} days`;
+}
 
 function SpacedRepetitionSession({ documentId, technique, onExit, onDashboard }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [session, setSession] = useState(null); // { tier, questions, quizId, dueTopics }
+  const [docTitle, setDocTitle] = useState('');
+  const [knowledge, setKnowledge] = useState({}); // topic → schedule state, for interval previews
   const [index, setIndex] = useState(0);
-  const [revealed, setRevealed] = useState(false); // answer shown for current Q
-  const [inputValue, setInputValue] = useState('');
-  const [confidence, setConfidence] = useState(null); // current Q confidence rating
-  const [results, setResults] = useState([]); // per-question { topic, isCorrect, nextReviewDate }
+  const [flipped, setFlipped] = useState(false); // answer side showing
+  const [saving, setSaving] = useState(false);
+  const [results, setResults] = useState([]); // per-card { topic, grade, isCorrect, nextReviewDate }
   const [finished, setFinished] = useState(false);
+  const [suggestion, setSuggestion] = useState(null); // another technique to try
   const resultHeadingRef = useRef(null);
+
+  useStudyTimer(!loading && !finished);
 
   useEffect(() => {
     let cancelled = false;
@@ -409,7 +460,11 @@ function SpacedRepetitionSession({ documentId, technique, onExit, onDashboard })
       setLoading(true);
       setError(null);
       try {
-        const s = await startSession(documentId);
+        const [s, ks, d] = await Promise.all([
+          startSession(documentId),
+          getKnowledgeState(documentId),
+          getDocument(documentId),
+        ]);
         if (cancelled) return;
         // Tag the session's quiz record as review-sourced for the Dashboard (Req 5.4).
         if (s.quizId != null) {
@@ -420,6 +475,8 @@ function SpacedRepetitionSession({ documentId, technique, onExit, onDashboard })
           }
         }
         setSession(s);
+        setKnowledge(ks);
+        setDocTitle(d?.title ?? '');
       } catch (err) {
         if (!cancelled) setError(err.message || 'Failed to start the review session.');
       } finally {
@@ -438,295 +495,241 @@ function SpacedRepetitionSession({ documentId, technique, onExit, onDashboard })
   const questions = session?.questions ?? [];
   const total = questions.length;
   const currentQ = questions[index];
+  const topic = currentQ?.topic || 'general';
+  const intervals = useMemo(() => previewIntervals(knowledge[topic] ?? {}), [knowledge, topic]);
 
-  function checkCorrect(q, answer) {
-    if (!answer) return false;
-    if (q.type === 'fill_in_blank') {
-      const acceptable = q.acceptable_answers ?? [q.correct_answer];
-      return acceptable.some(a => String(a).toLowerCase() === String(answer).toLowerCase().trim());
-    }
-    return answer === q.correct_answer;
+  function flip() {
+    setFlipped(f => !f);
+    playTone('flip');
   }
 
-  const [selected, setSelected] = useState(null); // current T/F selection
-
-  function reveal() {
-    setRevealed(true);
-  }
-
-  async function commitAndNext() {
-    const q = currentQ;
-    const answer = q.type === 'fill_in_blank' ? inputValue.trim() : selected;
-    const isCorrect = checkCorrect(q, answer);
-    const topic = q.topic || 'general';
-
-    // Update BKT mastery AND the SM-2 schedule for this topic (Req 4.2, 4.4).
-    // The confidence rating (when given) drives the SM-2 quality score; BKT
-    // always follows the binary correctness signal.
+  async function rate(grade) {
+    if (saving || !currentQ) return;
+    setSaving(true);
+    // Update BKT mastery AND the SM-2 schedule for this topic (Req 4.2, 4.4):
+    // the grade drives the SM-2 quality score; Good/Easy count as recalled.
     let schedule = null;
     try {
-      schedule = await recordAnswer(
-        documentId,
-        topic,
-        confidence != null ? { confidence } : { isCorrect },
-      );
+      schedule = await recordAnswer(documentId, topic, { grade });
+      setKnowledge(prev => ({
+        ...prev,
+        [topic]: { ...(prev[topic] ?? {}), interval: schedule.interval, easeFactor: schedule.easeFactor },
+      }));
     } catch {
       /* persistence is best-effort; still advance the session */
     }
-
-    setResults(prev => [
-      ...prev,
-      { topic, isCorrect, confidence, nextReviewDate: schedule?.nextReviewDate ?? null },
-    ]);
-
-    // Reset per-question state and advance (or finish).
-    setRevealed(false);
-    setInputValue('');
-    setConfidence(null);
-    setSelected(null);
+    const isCorrect = grade === 'good' || grade === 'easy';
+    playTone(isCorrect ? 'correct' : 'wrong');
+    const nextResults = [...results, { topic, grade, isCorrect, nextReviewDate: schedule?.nextReviewDate ?? null }];
+    setResults(nextResults);
+    setFlipped(false);
     if (index < total - 1) {
       setIndex(i => i + 1);
     } else {
+      // Score the session so it shows up on the learning curve.
+      if (session.quizId != null) {
+        try {
+          await updateQuizScore(session.quizId, nextResults.filter(r => r.isCorrect).length);
+        } catch {
+          /* the summary below still shows */
+        }
+      }
+      // If this way of studying is not working, suggest another technique.
+      const ratio = nextResults.filter(r => r.isCorrect).length / total;
+      if (shouldDiagnose({ quizScore: ratio })) {
+        try {
+          setSuggestion(await diagnose({
+            documentId,
+            currentHabit: technique ?? 'flashcards',
+            quizScore: ratio,
+            weakTopics: [...new Set(nextResults.filter(r => !r.isCorrect).map(r => r.topic))],
+          }));
+        } catch {
+          setSuggestion(null);
+        }
+      }
+      playTone('done');
       setFinished(true);
     }
+    setSaving(false);
   }
+
+  // Keyboard: Space flips the card, 1–4 rate it once the answer is showing.
+  useEffect(() => {
+    if (loading || finished || total === 0) return undefined;
+    function onKey(e) {
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'BUTTON' || tag === 'A' || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === ' ') {
+        e.preventDefault();
+        flip();
+      } else if (flipped && ['1', '2', '3', '4'].includes(e.key)) {
+        rate(REVIEW_GRADES[Number(e.key) - 1]);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   if (loading) return <LoadingSpinner message="Finding your due topics..." />;
   if (error) return <ErrorMessage message={error} onRetry={onExit} />;
 
   if (total === 0) {
     return (
-      <div className="bg-white rounded-2xl p-8 text-center border border-gray-100 shadow-sm" role="status">
-        <div className="text-5xl mb-3" aria-hidden="true">🎉</div>
-        <h2 className="font-bold text-gray-800 mb-1">Nothing due right now</h2>
-        <p className="text-gray-500 text-sm">
+      <div className="sb-card rounded-3xl px-6 py-10 text-center" role="status">
+        <h2 className="sb-display text-[21px] mb-1">Nothing due right now</h2>
+        <p className="sb-sub">
           You’re all caught up on spaced repetition for this document. Check back later.
         </p>
-        <button
-          onClick={onExit}
-          className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl min-h-[48px] transition-colors"
-        >
-          Back to document
-        </button>
+        <button type="button" onClick={onExit} className="sb-btn mt-5">Back to document</button>
       </div>
     );
   }
 
   // ── Results summary (Req 4.5: next due dates + per-topic recap) ────────────
   if (finished) {
-    const correctCount = results.filter(r => r.isCorrect).length;
+    const recalled = results.filter(r => r.isCorrect).length;
     return (
-      <div className="space-y-4">
-        <div
-          className="bg-white rounded-2xl p-8 shadow-md text-center"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="text-6xl mb-3" aria-hidden="true">
-            {correctCount >= total * 0.8 ? '🎉' : correctCount >= total * 0.5 ? '👍' : '📚'}
-          </div>
-          <h2
-            ref={resultHeadingRef}
-            tabIndex={-1}
-            className="text-3xl font-bold text-indigo-700 mb-1 outline-none"
-          >
-            {correctCount}/{total}
+      <div className="flex flex-col gap-5">
+        <header>
+          <p className="sb-eyebrow truncate">{docTitle || 'Review'}</p>
+          <h1 className="sb-title mt-1.5">Review complete</h1>
+        </header>
+        <section className="sb-card rounded-3xl px-6 py-9 text-center" role="status" aria-live="polite">
+          <h2 ref={resultHeadingRef} tabIndex={-1} className="sb-display text-[44px] leading-none outline-none" style={{ color: 'var(--sb-primary)' }}>
+            {recalled}/{total}
           </h2>
-          <p className="text-gray-500">Review complete</p>
-          <div className="mt-3">
-            <TierBadge tier={session.tier} />
-          </div>
-        </div>
+          <p className="sb-body mt-3">cards recalled (rated Good or Easy)</p>
+          <div className="mt-3"><TierBadge tier={session.tier} /></div>
+        </section>
 
         {/* Next due dates for the topics reviewed (Req 4.5) */}
-        <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-          <h3 className="font-bold text-gray-800 mb-3">Next review</h3>
-          <div className="space-y-2">
-            {results.map((r, i) => (
-              <div key={i} className="flex items-center justify-between text-sm">
-                <span className="text-gray-700 truncate">
-                  {r.isCorrect ? '✅' : '❌'} {r.topic}
-                </span>
-                <span className="text-gray-500 shrink-0 ml-2">
-                  {formatDue(r.nextReviewDate) ? `Due ${formatDue(r.nextReviewDate)}` : 'Scheduled'}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <section className="sb-card overflow-hidden" aria-labelledby="next-review">
+          <h3 id="next-review" className="sb-display text-base px-[18px] pt-[18px] pb-2">Next review</h3>
+          {results.map((r, i) => (
+            <div key={i} className="sb-row flex items-center gap-3 px-[18px] py-3 text-sm">
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: GRADE_META[r.grade].dot }} aria-hidden="true" />
+              <span className="flex-1 min-w-0 truncate">{r.topic}</span>
+              <span className="sb-chip">{GRADE_META[r.grade].label}</span>
+              <span className="sb-muted shrink-0">
+                {formatDue(r.nextReviewDate) ? `Due ${formatDue(r.nextReviewDate)}` : 'Scheduled'}
+              </span>
+            </div>
+          ))}
+        </section>
 
-        <div className="space-y-3">
-          <button
-            onClick={onDashboard}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl min-h-[48px] transition-colors"
-          >
-            📈 See my learning curve
+        <TechniqueSuggestion suggestion={suggestion} />
+
+        <div className="flex flex-wrap gap-3">
+          <button type="button" onClick={onDashboard} className="sb-btn flex-1 basis-[200px]">
+            <Icon name="chart" /> See my learning curve
           </button>
-          <button
-            onClick={onExit}
-            className="w-full border border-gray-200 text-gray-600 font-medium py-3 rounded-xl min-h-[48px]"
-          >
-            Back to document
-          </button>
+          <button type="button" onClick={onExit} className="sb-btn-ghost flex-1 basis-[200px]">Back to document</button>
         </div>
       </div>
     );
   }
 
-  // ── Active question ─────────────────────────────────────────────────────────
-  const answered =
-    currentQ.type === 'fill_in_blank' ? inputValue.trim().length > 0 : selected != null;
+  // ── Active card ─────────────────────────────────────────────────────────────
+  const remaining = total - index;
+  const minutes = Math.max(1, Math.round((remaining * 40) / 60));
+  const isTrueFalse = currentQ.type === 'true_false';
 
   return (
-    <div className="space-y-4">
-      {/* Progress */}
-      <div className="flex items-center gap-2">
-        <span className="font-semibold text-gray-800">Topic {index + 1}/{total}</span>
+    <div className="flex flex-col gap-5">
+      <header className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="sb-eyebrow truncate">{docTitle || 'Review'}</p>
+          <h1 className="sb-title mt-1.5">Daily review</h1>
+        </div>
+        <span className="sb-counter" aria-label={`Card ${index + 1} of ${total}`}>{index + 1} of {total}</span>
+      </header>
+
+      <div className="sb-progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={index + 1} aria-label="Review progress">
+        <span style={{ width: `${((index + 1) / total) * 100}%` }} />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-center gap-x-7 gap-y-1 text-xs sb-muted">
+        <span className="flex items-center gap-2"><Icon name="clock" size={16} /> About {minutes} minute{minutes === 1 ? '' : 's'}</span>
+        <span className="flex items-center gap-2"><Icon name="sparkle" size={16} /> Spaced repetition</span>
         <TierBadge tier={session.tier} />
-        {currentQ.topic && (
-          <span className="ml-auto text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">
-            🔁 {currentQ.topic}
-          </span>
-        )}
-      </div>
-      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-indigo-500 rounded-full transition-all"
-          style={{ width: `${(index / total) * 100}%` }}
-        />
       </div>
 
-      <fieldset className="border-0 p-0 m-0">
-        <legend className="bg-white rounded-2xl p-6 shadow-md mb-4 w-full">
-          <p className="text-gray-800 text-lg leading-relaxed whitespace-pre-line">{currentQ.question}</p>
-        </legend>
-
-        {/* True/False options */}
-        {currentQ.type === 'true_false' && (
-          <div className="space-y-3">
-            {(currentQ.options ?? ['True', 'False']).map(option => {
-              const isSel = selected === option;
-              const correct = revealed && option === currentQ.correct_answer;
-              const wrong = revealed && isSel && option !== currentQ.correct_answer;
-              return (
-                <button
-                  key={option}
-                  onClick={() => !revealed && setSelected(option)}
-                  disabled={revealed}
-                  aria-pressed={isSel}
-                  className={`w-full p-4 rounded-xl border-2 text-left font-medium text-lg transition-all min-h-[56px] ${
-                    wrong ? 'border-red-400 bg-red-50 text-red-700' :
-                    correct ? 'border-green-400 bg-green-50 text-green-700' :
-                    isSel ? 'border-indigo-400 bg-indigo-50 text-indigo-700' :
-                    'border-gray-200 bg-white hover:border-indigo-200 text-gray-700'
-                  }`}
-                >
-                  {option}
-                  {revealed && correct && <span className="ml-2">✓</span>}
-                  {revealed && wrong && <span className="ml-2">✗</span>}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Fill-in-blank input */}
-        {currentQ.type === 'fill_in_blank' && !revealed && (
-          <div className="space-y-3">
-            <label htmlFor="sr-answer" className="sr-only">Your answer</label>
-            <input
-              id="sr-answer"
-              type="text"
-              value={inputValue}
-              onChange={e => setInputValue(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && answered && reveal()}
-              placeholder="Type your answer..."
-              className="w-full border-2 border-gray-200 focus:border-indigo-400 rounded-xl px-4 py-3 text-lg outline-none min-h-[56px]"
-              autoFocus
-            />
-          </div>
-        )}
-
-        {/* Revealed answer + explanation */}
-        {revealed && (
-          <div
-            role="status"
-            aria-live="polite"
-            className={`rounded-xl p-4 mt-3 ${
-              checkCorrect(currentQ, currentQ.type === 'fill_in_blank' ? inputValue : selected)
-                ? 'bg-green-50 border border-green-200'
-                : 'bg-red-50 border border-red-200'
-            }`}
-          >
-            <div className="font-semibold text-sm">
-              {checkCorrect(currentQ, currentQ.type === 'fill_in_blank' ? inputValue : selected)
-                ? '✅ Correct!'
-                : '❌ Not quite'}
-            </div>
-            {currentQ.type === 'fill_in_blank' && (
-              <div className="text-sm mt-1">
-                Answer: <span className="font-bold">{currentQ.correct_answer}</span>
-              </div>
-            )}
+      <button
+        type="button"
+        onClick={flip}
+        className="sb-flashcard"
+        data-side={flipped ? 'answer' : 'question'}
+        aria-label={flipped ? 'Answer side. Flip back to the question' : 'Question side. Flip to reveal the answer'}
+      >
+        <span className="sb-eyebrow text-[11px] absolute top-[26px] left-7" style={{ position: 'absolute', letterSpacing: '0.14em' }}>
+          {flipped ? 'Answer' : 'Question'}
+        </span>
+        {flipped ? (
+          <>
+            <span className="sb-pill" style={{ background: 'var(--sb-mint)', color: 'var(--sb-mint-ink)' }}>{topic}</span>
+            <span className="sb-display text-[24px] sm:text-[27px] leading-snug max-w-[600px]" style={{ letterSpacing: '-0.02em' }}>
+              {currentQ.correct_answer}
+            </span>
             {currentQ.explanation && (
-              <div className="text-gray-500 text-xs mt-1">{currentQ.explanation}</div>
+              <span className="sb-body text-sm leading-relaxed max-w-[560px]">{currentQ.explanation}</span>
             )}
-          </div>
+          </>
+        ) : (
+          <>
+            {/* The topic is often the answer itself, so it only appears on the answer side. */}
+            <span className="sb-pill" style={{ background: 'var(--sb-coral-bg)', color: 'var(--sb-coral-ink)' }}>{isTrueFalse ? 'True or false' : 'Recall'}</span>
+            <span className="sb-display text-[22px] sm:text-[27px] leading-snug max-w-[600px] whitespace-pre-line" style={{ letterSpacing: '-0.02em' }}>
+              {currentQ.question}
+            </span>
+            <span className="flex items-center gap-2 text-xs sb-muted">
+              <Icon name="flip" size={16} />
+              {isTrueFalse ? 'True or false? Decide, then tap the card to reveal' : 'Recall the answer, then tap the card to reveal'}
+            </span>
+          </>
         )}
-      </fieldset>
+      </button>
 
-      {/* Reveal control (check the answer before self-rating confidence) */}
-      {!revealed && (
-        <button
-          onClick={reveal}
-          disabled={!answered}
-          className="w-full bg-indigo-600 disabled:bg-gray-200 text-white disabled:text-gray-400 font-bold py-3 rounded-xl min-h-[48px] transition-colors"
-        >
-          Check answer
-        </button>
+      {flipped && (
+        <p className="text-center text-xs sb-muted -mt-2">
+          Something wrong with this card?{' '}
+          <Link to={`/student/document/${documentId}?tab=cards`} className="font-bold underline" style={{ color: 'var(--sb-primary)' }}>Fix it</Link>
+        </p>
       )}
 
-      {/* Confidence rating → SM-2 quality score (Req 4.4) */}
-      {revealed && (
-        <fieldset className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
-          <legend className="text-sm font-semibold text-gray-600 px-1">How confident were you?</legend>
-          <p className="text-xs text-gray-500 mb-3 px-1">
-            This tunes when we’ll resurface this topic.
-          </p>
-          <div className="grid grid-cols-3 gap-2" role="group" aria-label="Confidence rating">
-            {CONFIDENCE_RATINGS.map(rating => {
-              const meta = CONFIDENCE_LABELS[rating];
-              const isSel = confidence === rating;
-              return (
-                <button
-                  key={rating}
-                  type="button"
-                  onClick={() => setConfidence(rating)}
-                  aria-pressed={isSel}
-                  className={`p-3 rounded-xl border-2 text-sm font-medium transition-all min-h-[48px] ${
-                    isSel
-                      ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
-                      : 'border-gray-200 bg-white hover:border-indigo-200 text-gray-700'
-                  }`}
-                >
-                  <span aria-hidden="true" className="mr-1">{meta.icon}</span>
-                  {meta.label}
-                </button>
-              );
-            })}
+      {/* Live region so the revealed answer is announced */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {flipped ? `Answer: ${currentQ.correct_answer}. ${currentQ.explanation ?? ''}` : ''}
+      </p>
+
+      {flipped ? (
+        <fieldset className="border-0 p-0 m-0 min-w-0" disabled={saving}>
+          <legend className="w-full text-center text-[13px] sb-muted mb-3">How well did you know this?</legend>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {REVIEW_GRADES.map((grade, i) => (
+              <button
+                key={grade}
+                type="button"
+                onClick={() => rate(grade)}
+                className="sb-card flex flex-col items-center justify-center gap-1 py-2.5"
+                style={{ borderRadius: 14, minHeight: 68 }}
+                aria-label={`${GRADE_META[grade].label}: review again in ${intervalLabel(intervals[grade])}`}
+                aria-keyshortcuts={String(i + 1)}
+              >
+                <span className="font-bold text-sm">{GRADE_META[grade].label}</span>
+                <span className="w-[9px] h-[9px] rounded-full" style={{ background: GRADE_META[grade].dot }} aria-hidden="true" />
+                <span className="text-[11px] sb-muted">{intervalLabel(intervals[grade])}</span>
+              </button>
+            ))}
           </div>
         </fieldset>
+      ) : (
+        <button type="button" onClick={flip} className="sb-btn self-center px-11">Show answer</button>
       )}
 
-      {revealed && (
-        <button
-          onClick={commitAndNext}
-          disabled={confidence == null}
-          className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 text-white font-bold py-4 rounded-xl min-h-[56px] text-lg transition-colors"
-        >
-          {index < total - 1 ? 'Next topic →' : 'See results →'}
-        </button>
-      )}
+      <p className="text-center text-xs sb-muted">
+        Press space to flip{flipped ? ', 1–4 to rate' : ''} · Your answer is saved on this device
+      </p>
     </div>
   );
 }
@@ -827,7 +830,6 @@ function FeynmanSession({ documentId, initialTopic, weakTopics, onExit, onDashbo
         </div>
         {options.length === 0 ? (
           <div className="bg-white rounded-2xl p-8 text-center border border-gray-100 shadow-sm">
-            <div className="text-5xl mb-3" aria-hidden="true">🎉</div>
             <p className="text-gray-500 text-sm">
               No weak topics here. Take a quiz to surface topics worth explaining.
             </p>
@@ -857,114 +859,73 @@ function FeynmanSession({ documentId, initialTopic, weakTopics, onExit, onDashbo
     );
   }
 
-  // ── Result view (coverage / gaps / matched passages + self-rating) ──────────
+  // ── Result view: your explanation side by side with what the notes say ──────
   if (result) {
+    const covered = Array.isArray(result.matchedKeywords) ? result.matchedKeywords : [];
+    const missing = Array.isArray(result.missedKeywords) ? result.missedKeywords : [];
+    const totalIdeas = covered.length + missing.length;
     const coveragePct = Math.round((result.coverage ?? 0) * 100);
+    const notesText = result.sourceText || result.matchedPassages?.[0]?.text || sourcePassage || '';
+    const verdict = coveragePct >= 70
+      ? 'Great. You explained the main idea.'
+      : coveragePct >= 40
+        ? 'Good start. A few key ideas are missing.'
+        : 'Not yet. Read what your notes say, then try again.';
     return (
-      <div className="space-y-4">
-        <div
-          ref={resultRef}
-          tabIndex={-1}
-          className="bg-white rounded-2xl p-6 shadow-md outline-none"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-bold text-gray-800 text-lg">
-              <span aria-hidden="true" className="mr-1">🗣️</span>
-              Your explanation
-            </h2>
+      <div className="flex flex-col gap-4">
+        <section ref={resultRef} tabIndex={-1} className="sb-card rounded-3xl p-6 outline-none" role="status" aria-live="polite">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h2 className="sb-display text-[21px]">How you did</h2>
             <TierBadge tier={result.tier} />
           </div>
-
-          {/* Coverage meter */}
-          <div className="mb-4">
-            <div className="flex items-center justify-between text-sm mb-1">
-              <span className="text-gray-600">Topic coverage</span>
-              <span className="font-semibold text-gray-800">{coveragePct}%</span>
-            </div>
-            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  coveragePct >= 70 ? 'bg-green-500' : coveragePct >= 40 ? 'bg-yellow-400' : 'bg-red-400'
-                }`}
-                style={{ width: `${coveragePct}%` }}
-              />
-            </div>
+          <p className="font-bold">{verdict}</p>
+          <p className="sb-sub mb-2">
+            {totalIdeas > 0 ? `You covered ${covered.length} of ${totalIdeas} key ideas.` : `Your explanation matched ${coveragePct}% of the notes.`}
+          </p>
+          <div className="sb-progress" aria-hidden="true">
+            <span style={{ width: `${coveragePct}%`, background: coveragePct >= 70 ? 'var(--sb-good)' : coveragePct >= 40 ? '#B7791F' : 'var(--sb-coral)' }} />
           </div>
+          {result.feedback && <p className="text-sm sb-body leading-relaxed mt-4">{result.feedback}</p>}
+        </section>
 
-          {/* AI feedback (cloud tier only) */}
-          {result.feedback && (
-            <p className="text-sm text-gray-700 leading-relaxed mb-3">{result.feedback}</p>
-          )}
-
-          {/* Covered key terms */}
-          {Array.isArray(result.matchedKeywords) && result.matchedKeywords.length > 0 && (
-            <div className="mb-3">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                ✅ You covered
-              </h3>
-              <div className="flex flex-wrap gap-1.5">
-                {result.matchedKeywords.map(k => (
-                  <span key={k} className="text-xs bg-green-50 text-green-700 px-2 py-1 rounded-full">{k}</span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Possible gaps */}
-          {Array.isArray(result.missedKeywords) && result.missedKeywords.length > 0 && (
-            <div className="mb-3">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                🔍 Possible gaps
-              </h3>
-              <div className="flex flex-wrap gap-1.5">
-                {result.missedKeywords.map(k => (
-                  <span key={k} className="text-xs bg-amber-50 text-amber-700 px-2 py-1 rounded-full">{k}</span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Matched source passages */}
-          {Array.isArray(result.matchedPassages) && result.matchedPassages.length > 0 && (
-            <div>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                📄 From your notes
-              </h3>
-              <div className="space-y-2">
-                {result.matchedPassages.map((p, i) => (
-                  <blockquote
-                    key={i}
-                    className="text-sm text-gray-600 border-l-2 border-indigo-200 pl-3 italic"
-                  >
-                    {p.text}
-                  </blockquote>
-                ))}
-              </div>
-            </div>
-          )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <section className="sb-card p-5" aria-labelledby="feynman-yours">
+            <h3 id="feynman-yours" className="sb-eyebrow mb-2">What you wrote</h3>
+            <p className="text-sm leading-relaxed whitespace-pre-line">
+              <Highlighted text={explanation} covered={covered} missing={[]} />
+            </p>
+          </section>
+          <section className="sb-card p-5" aria-labelledby="feynman-notes" style={{ background: 'var(--sb-surface-soft)' }}>
+            <h3 id="feynman-notes" className="sb-eyebrow mb-2">What your notes say</h3>
+            {notesText ? (
+              <p className="text-sm leading-relaxed">
+                <Highlighted text={notesText} covered={covered} missing={missing} />
+              </p>
+            ) : (
+              <p className="sb-sub">No matching passage was found in your notes for this topic.</p>
+            )}
+          </section>
         </div>
+        <p className="flex flex-wrap gap-x-5 gap-y-1 text-xs sb-muted">
+          <span><mark className="sb-mark-ok">Green</mark> = you covered this</span>
+          <span><mark className="sb-mark-miss">Underlined</mark> = missing from your explanation</span>
+        </p>
 
-        <div className="space-y-3">
-          <button
-            onClick={restart}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl min-h-[48px] transition-colors"
-          >
-            Explain again
-          </button>
-          <button
-            onClick={onDashboard}
-            className="w-full border border-gray-200 text-gray-600 font-medium py-3 rounded-xl min-h-[48px]"
-          >
-            📈 See my learning curve
-          </button>
-          <button
-            onClick={onExit}
-            className="w-full text-gray-500 font-medium py-3 rounded-xl min-h-[48px]"
-          >
-            Back to document
-          </button>
+        {missing.length > 0 && (
+          <section className="sb-card p-5">
+            <h3 className="font-bold">Add these next time</h3>
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {missing.slice(0, 8).map(k => (
+                <span key={k} className="sb-chip" style={{ background: 'var(--sb-amber-bg)', color: 'var(--sb-amber-ink)' }}>{k}</span>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <div className="flex flex-wrap gap-3">
+          <button type="button" onClick={restart} className="sb-btn flex-1 basis-[180px]">Try again</button>
+          <button type="button" onClick={onDashboard} className="sb-btn-ghost flex-1 basis-[180px]"><Icon name="chart" /> See my learning curve</button>
+          <button type="button" onClick={onExit} className="sb-btn-ghost flex-1 basis-[180px]">Back to document</button>
         </div>
       </div>
     );

@@ -6,6 +6,7 @@
 
 // PDF.js worker must be configured before use
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { cleanModuleLines } from './cleanModule.js';
 let pdfjsLib = null;
 
 async function getPdfjsLib() {
@@ -22,7 +23,7 @@ async function getPdfjsLib() {
  * @param {(progress: { stage: string, page?: number, pageCount?: number }) => void} [onProgress]
  *   Optional progress callback, invoked once per extracted page. Omitting it
  *   preserves the original behavior exactly.
- * @returns {Promise<{ rawText: string, pages: string[] }>}
+ * @returns {Promise<{ rawText: string, pages: string[], lineText: string, cleanup: { removed: number, kinds: object } }>}
  */
 export async function extractTextFromPDF(file, onProgress) {
   if (!file || !(file.type === 'application/pdf' || /\.pdf$/i.test(file.name ?? ''))) throw new Error('Please choose a PDF file.');
@@ -34,31 +35,76 @@ export async function extractTextFromPDF(file, onProgress) {
     const pdf = await loadingTask.promise;
     const pageCount = pdf.numPages;
     if (pageCount > 300) throw new Error('Choose a PDF with 300 pages or fewer.');
-    const pages = [];
+    const linePages = []; // lines of each page, with the handout's line breaks kept
     let characterCount = 0;
     for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
       const page = await pdf.getPage(pageNum);
       const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map(item => item.str)
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      pages.push(pageText); // Keep empty pages so later page references stay correct.
-      characterCount += pageText.length;
+      const lines = pageLines(textContent.items);
+      linePages.push(lines);
+      characterCount += lines.join(' ').length;
       page.cleanup();
       if (characterCount > 1000000) throw new Error('This PDF contains too much text. Split it into smaller files.');
       onProgress?.({ stage: 'extracting', page: pageNum, pageCount });
     }
+    // Remove what is not the lesson (name/date/score fields, page numbers,
+    // repeated headers and footers) before anything is saved or shown.
+    const cleaned = cleanModuleLines(linePages);
+    // One flattened string per page; empty pages are kept so page numbers stay right.
+    const pages = cleaned.pages.map(lines => lines.join(' ').replace(/\s+/g, ' ').trim());
     const rawText = pages.join('\n\n');
     if (!rawText.trim()) {
       throw new Error('No readable text found in this PDF. It may be a scanned image or protected document.');
     }
-    return { rawText, pages };
+    return {
+      rawText,
+      pages,
+      lineText: cleaned.pages.map(lines => lines.join('\n')).join('\n\n'),
+      cleanup: { removed: cleaned.removed, kinds: cleaned.kinds },
+    };
   } finally {
     await loadingTask.destroy();
   }
 }
+
+/**
+ * Rebuild the visual lines of a page from PDF.js text items. Glossary-style
+ * handouts ("Term - meaning", one per line) only make sense line by line, so
+ * the quiz and summary read this version. A new line starts when PDF.js marks
+ * the end of a line or the text moves to a different height on the page.
+ */
+export function pageLines(items) {
+  const lines = [];
+  let current = '';
+  let lastY = null;
+  let lastEndX = null;
+  const flush = () => {
+    // Keep tabs (column gaps) but tidy the spaces inside each cell.
+    const line = current.split('\t').map(cell => cell.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\t');
+    if (line) lines.push(line);
+    current = '';
+    lastEndX = null;
+  };
+  for (const item of items ?? []) {
+    if (typeof item?.str !== 'string') continue;
+    const x = Array.isArray(item.transform) ? item.transform[4] : null;
+    const y = Array.isArray(item.transform) ? item.transform[5] : null;
+    if (lastY != null && y != null && Math.abs(y - lastY) > 2) flush();
+    if (item.str.trim()) {
+      // A wide horizontal jump on the same line is a table or column gap.
+      const gap = lastEndX != null && x != null ? x - lastEndX : 0;
+      current += `${current ? (gap > COLUMN_GAP ? '\t' : ' ') : ''}${item.str}`;
+      if (x != null) lastEndX = x + (Number.isFinite(item.width) ? item.width : 0);
+    }
+    if (y != null) lastY = y;
+    if (item.hasEOL) flush();
+  }
+  flush();
+  return lines;
+}
+
+/** Horizontal gap (PDF points) that counts as a new table cell or column. */
+const COLUMN_GAP = 24;
 
 /**
  * Split text into overlapping chunks of ~400 tokens with 50-token overlap.
@@ -129,10 +175,10 @@ function estimateTokens(text) {
  * @returns {Promise<{ title: string, rawText: string, chunks: string[], pages: string[] }>}
  */
 export async function processDocument(file, onProgress) {
-  const { rawText, pages } = await extractTextFromPDF(file, onProgress);
+  const { rawText, pages, lineText, cleanup } = await extractTextFromPDF(file, onProgress);
   onProgress?.({ stage: 'chunking' });
   const chunks = chunkText(rawText);
   const title = file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ');
   onProgress?.({ stage: 'done' });
-  return { title, rawText, chunks, pages };
+  return { title, rawText, chunks, pages, lineText, cleanup };
 }

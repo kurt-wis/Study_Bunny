@@ -1,7 +1,7 @@
 import { makeModelHandler } from '../lib/modelHandler.js';
 import { validateDiagnosis } from '../lib/validation.js';
 import { validateDiagnosis as validateOutput } from '../lib/responseValidators.js';
-import { invokeModel as realInvokeModel } from '../lib/bedrockClient.js';
+import { invokeModel as realInvokeModel } from '../lib/modelClient.js';
 
 export function makeHandler({ invokeModel }) {
   return makeModelHandler({ name: 'analyze-technique', validateInput: validateDiagnosis,

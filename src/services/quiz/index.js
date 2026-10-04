@@ -27,7 +27,7 @@ export async function generateQuiz(documentId, opts = {}) {
       result = await quizTier2(doc.chunks ?? [doc.rawText], knowledgeState);
     } catch (error) {
       console.error('[Quiz] Cloud tier failed, falling back to deterministic:', error);
-      result = await quizTier3(doc.rawText, knowledgeState);
+      result = await quizTier3(doc.lineText || doc.rawText, knowledgeState, { items: doc.items });
     }
   } else if (tier === TIER.EDGE) {
     try {
@@ -35,10 +35,10 @@ export async function generateQuiz(documentId, opts = {}) {
       result = await quizTier1(doc.rawText, knowledgeState);
     } catch (error) {
       console.error('[Quiz] Edge tier failed, falling back to deterministic:', error);
-      result = await quizTier3(doc.rawText, knowledgeState);
+      result = await quizTier3(doc.lineText || doc.rawText, knowledgeState, { items: doc.items });
     }
   } else {
-    result = await quizTier3(doc.rawText, knowledgeState);
+    result = await quizTier3(doc.lineText || doc.rawText, knowledgeState, { items: doc.items });
   }
 
   // Save quiz record

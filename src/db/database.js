@@ -54,8 +54,28 @@ export default db;
 
 // ─── Documents ───────────────────────────────────────────────────────────────
 
-export async function saveDocument({ title, rawText, chunks, pages = [], createdAt }) {
-  return db.documents.add({ title, rawText, chunks, pages, createdAt: createdAt ?? new Date() });
+export async function saveDocument({ title, rawText, chunks, pages = [], lineText = null, cleanup = null, createdAt }) {
+  // `lineText` is the same text with the handout's line breaks kept (used to
+  // find "term - meaning" lines). Older documents do not have it.
+  // `cleanup` records how many non-lesson lines were removed at upload.
+  return db.documents.add({ title, rawText, chunks, pages, lineText, cleanup, createdAt: createdAt ?? new Date() });
+}
+
+/**
+ * Save the student's corrected cards (term + meaning) for a document, or pass
+ * null to go back to the automatic ones. Cached summaries are dropped so the
+ * next summary is rebuilt from the corrected cards.
+ */
+export async function updateDocumentItems(documentId, items) {
+  const clean = Array.isArray(items)
+    ? items
+      .map(i => ({ term: String(i?.term ?? '').replace(/\s+/g, ' ').trim(), definition: String(i?.definition ?? '').replace(/\s+/g, ' ').trim() }))
+      .filter(i => i.term && i.definition)
+    : null;
+  await db.transaction('rw', [db.documents, db.summaries], async () => {
+    await db.documents.update(documentId, { items: clean && clean.length > 0 ? clean : null, itemsEditedAt: clean ? new Date() : null });
+    await db.summaries.where('documentId').equals(documentId).delete();
+  });
 }
 
 export async function getDocument(documentId) {
@@ -282,4 +302,34 @@ export async function saveVerificationReport(documentId, report) {
 export async function getVerificationReports(documentId) {
   const rows = await db.verificationReports.where('documentId').equals(documentId).sortBy('createdAt');
   return rows.reverse();
+}
+
+// ── Whole-device data (Profile → Data & privacy) ─────────────────────────────
+
+/** Every knowledge-state row across all documents (Home overview). */
+export async function getAllKnowledgeRecords() {
+  return db.knowledgeState.toArray();
+}
+
+/** Every quiz/review record across all documents (Home overview). */
+export async function getAllQuizzes() {
+  return db.quizzes.toArray();
+}
+
+/** A plain-object snapshot of everything stored on this device, for export. */
+export async function exportAllData() {
+  const tables = {};
+  for (const table of db.tables) {
+    tables[table.name] = await table.toArray();
+  }
+  // The Cloud AI access code is a shared secret, not study data: leave it out.
+  tables.appSettings = (tables.appSettings ?? []).filter(row => row.key !== 'cloudAccessCode');
+  return { app: 'Study Bunny', exportedAt: new Date().toISOString(), schemaVersion: db.verno, tables };
+}
+
+/** Permanently remove all documents, progress and settings from this device. */
+export async function clearAllData() {
+  await db.transaction('rw', db.tables, async () => {
+    await Promise.all(db.tables.map(table => table.clear()));
+  });
 }

@@ -34,6 +34,53 @@ const STOPWORDS = new Set([
   'is', 'it', 'as', 'be', 'was', 'are', 'from', 'this', 'that', 'its', 'not',
 ]);
 
+/** Words too general to count as a "key idea" of a topic. */
+const GENERIC = new Set(['using', 'used', 'uses', 'use', 'down', 'into', 'onto', 'also', 'such', 'than', 'then', 'them', 'they', 'their', 'there', 'these', 'those', 'which', 'while', 'when', 'where', 'what', 'who', 'how', 'has', 'have', 'had', 'will', 'can', 'may', 'more', 'most', 'some', 'many', 'each', 'other', 'called', 'known', 'through', 'out', 'over', 'under', 'about', 'between', 'during', 'very', 'all', 'any', 'one', 'two']);
+
+/** Groups of everyday words that mean roughly the same thing in study notes. */
+const SYNONYM_GROUPS = [
+  ['make', 'produce', 'create', 'generate', 'form', 'build', 'synthesize', 'construct', 'manufacture'],
+  ['break', 'destroy', 'digest', 'decompose', 'dissolve', 'split'],
+  ['store', 'keep', 'hold', 'contain', 'house', 'save'],
+  ['control', 'regulate', 'manage', 'direct', 'govern'],
+  ['move', 'transport', 'carry', 'transfer', 'deliver'],
+  ['change', 'convert', 'transform', 'turn', 'alter'],
+  ['need', 'require'], ['get', 'obtain', 'receive', 'gain', 'absorb', 'take'],
+  ['give', 'provide', 'supply', 'release'], ['show', 'display', 'demonstrate', 'indicate'],
+  ['help', 'aid', 'assist', 'support'], ['start', 'begin', 'initiate'], ['end', 'finish', 'stop', 'complete'],
+  ['big', 'large', 'huge', 'great'], ['small', 'tiny', 'little', 'minute'], ['fast', 'quick', 'rapid'],
+  ['part', 'component', 'piece', 'section'], ['job', 'function', 'role', 'purpose', 'task', 'work'],
+  ['person', 'human', 'people', 'individual'], ['child', 'kid'],
+  ['energy', 'power', 'fuel'], ['food', 'nutrient', 'glucose', 'sugar'], ['waste', 'garbage', 'trash', 'unwanted'],
+  ['protect', 'defend', 'guard', 'shield'], ['join', 'combine', 'merge', 'unite', 'connect', 'link'],
+  ['important', 'essential', 'vital', 'main', 'major'], ['cause', 'lead', 'result', 'trigger'],
+  ['increase', 'rise', 'grow', 'raise'], ['decrease', 'reduce', 'lower', 'drop', 'fall'],
+  ['idea', 'concept', 'notion'], ['rule', 'law', 'principle'],
+];
+
+/** Reduce a word to a simple base form: "stores"/"stored"/"storing" → "stor". */
+export function stem(word) {
+  let w = String(word ?? '').toLowerCase();
+  if (w.length <= 3) return w;
+  if (w.endsWith('ies') && w.length > 4) w = `${w.slice(0, -3)}y`;
+  else if (w.endsWith('sses')) w = w.slice(0, -2);
+  else if (/(?:s|x|z|ch|sh)es$/.test(w) && w.length > 4) w = w.slice(0, -2);
+  else if (w.endsWith('s') && !w.endsWith('ss') && w.length > 3) w = w.slice(0, -1);
+  if (w.endsWith('ing') && w.length > 5) w = w.slice(0, -3);
+  else if (w.endsWith('ed') && w.length > 4) w = w.slice(0, -2);
+  if (w.endsWith('e') && w.length > 3) w = w.slice(0, -1);
+  return w;
+}
+
+const SYNONYM_OF = new Map();
+SYNONYM_GROUPS.forEach((group, i) => group.forEach(word => SYNONYM_OF.set(stem(word), `~${i}`)));
+
+/** One label for every word form and listed synonym of the same idea. */
+export function canonical(word) {
+  const base = stem(word);
+  return SYNONYM_OF.get(base) ?? base;
+}
+
 /** Valid self-rating values (Got it / Partially / Missed it). */
 const SELF_RATINGS = Object.freeze(['got_it', 'partial', 'missed']);
 
@@ -78,6 +125,43 @@ export function extractKeyTerms(chunks, limit = 20) {
     .map(([term]) => term);
 }
 
+/**
+ * The few sentences in the notes that are actually about `topic`. Comparing an
+ * explanation against these (instead of the whole document) keeps the "key
+ * ideas" on-topic, so the feedback shows the real meaning the student should
+ * have explained. Falls back to an empty list when nothing matches.
+ *
+ * @param {string[]} chunks
+ * @param {string} topic
+ * @param {number} [maxSentences=3]
+ * @returns {string[]}
+ */
+export function focusSentences(chunks, topic, maxSentences = 3) {
+  if (!Array.isArray(chunks) || typeof topic !== 'string' || !topic.trim()) return [];
+  const sentences = chunks
+    .filter(c => typeof c === 'string')
+    .flatMap(c => c.match(/[^.!?]+[.!?]+/g) || [c])
+    .map(s => s.replace(/\s+/g, ' ').trim())
+    .filter(s => s.length > 0);
+  const topicTokens = tokenize(topic);
+  if (topicTokens.length === 0) return [];
+  const scored = sentences
+    .map((text, index) => {
+      const tokens = new Set(tokenize(text));
+      return { text, index, score: topicTokens.filter(t => tokens.has(t)).length };
+    })
+    .filter(s => s.score > 0);
+  // Keep only sentences that match the topic well; a single shared word
+  // ("material", "cell") is not enough to count as being about the topic.
+  const best = scored.reduce((m, s) => Math.max(m, s.score), 0);
+  const focused = scored
+    .filter(s => s.score >= Math.max(1, best / 2))
+    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+    .slice(0, maxSentences)
+    .sort((a, b) => a.index - b.index);
+  return [...new Set(focused.map(s => s.text))];
+}
+
 /** Normalize a self-rating to a known value or null. */
 function normalizeSelfRating(selfRating) {
   return SELF_RATINGS.includes(selfRating) ? selfRating : null;
@@ -104,13 +188,20 @@ export function evaluateFeynmanTier3({
   keyTermLimit = 20,
 } = {}) {
   const safeChunks = Array.isArray(chunks) ? chunks.filter(c => typeof c === 'string') : [];
-  const keyTerms = extractKeyTerms(safeChunks, keyTermLimit);
+  const termCap = Number.isInteger(keyTermLimit) && keyTermLimit > 0 ? keyTermLimit : 20;
+  // Drop filler words, and treat different forms of one word as one idea.
+  const seenIdeas = new Set();
+  const keyTerms = extractKeyTerms(safeChunks, termCap + GENERIC.size)
+    .filter(term => !GENERIC.has(term))
+    .filter(term => { const idea = canonical(term); if (seenIdeas.has(idea)) return false; seenIdeas.add(idea); return true; })
+    .slice(0, termCap);
 
   // Set of distinct tokens the student actually used.
-  const explanationTokens = new Set(tokenize(explanation));
+  // The student's words in base form, so "makes" matches "produce" and "stored" matches "stores".
+  const explanationTokens = new Set(tokenize(explanation).map(canonical));
 
-  const matchedKeywords = keyTerms.filter(term => explanationTokens.has(term));
-  const missedKeywords = keyTerms.filter(term => !explanationTokens.has(term));
+  const matchedKeywords = keyTerms.filter(term => explanationTokens.has(canonical(term)));
+  const missedKeywords = keyTerms.filter(term => !explanationTokens.has(canonical(term)));
 
   // Coverage is the fraction of key terms the explanation covered. With no key
   // terms (empty source) there is nothing to cover, so coverage is 0.

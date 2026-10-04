@@ -1,5 +1,5 @@
 /**
- * Tier 2 Quiz Generation — Cloud AI (Amazon Bedrock via Lambda).
+ * Tier 2 Quiz Generation — Cloud AI (the hosted model behind this site's /api routes).
  */
 import { apiPost } from '../../utils/apiTransport.js';
 import { buildDifficultyInstruction } from '../difficultyBuilder.js';

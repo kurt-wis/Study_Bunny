@@ -21,7 +21,7 @@
  * lazy-imported inside the async orchestrator so the pure helpers in this file
  * stay loadable (and unit-testable) outside a Vite runtime (e.g. `node --test`).
  */
-import { evaluateFeynmanTier3, FEYNMAN_SELF_RATINGS } from './feynmanTier3.js';
+import { evaluateFeynmanTier3, focusSentences, FEYNMAN_SELF_RATINGS } from './feynmanTier3.js';
 
 /**
  * AI coverage at/above which a cloud Feynman attempt counts as a "correct"
@@ -178,6 +178,15 @@ export async function evaluateFeynman({
     ? doc.chunks
     : (typeof doc.rawText === 'string' ? [doc.rawText] : []);
 
+  // Offline comparison uses only the sentences about this topic, with a short
+  // list of key ideas, so feedback stays focused and easy to read.
+  // Prefer the line-by-line text so glossary lines ("Term - meaning") stay separate.
+  const focusSource = typeof doc.lineText === 'string' && doc.lineText.trim() ? doc.lineText.split('\n') : chunks;
+  const focus = focusSentences(focusSource, topic);
+  const offlineChunks = focus.length > 0 ? focus : chunks;
+  const offlineLimit = focus.length > 0 ? Math.min(keyTermLimit, 10) : keyTermLimit;
+  const sourceText = focus.length > 0 ? focus.join(' ') : null;
+
   const { tier } = await resolveTier({ feature: 'feynman', preference });
 
   let result;
@@ -189,13 +198,13 @@ export async function evaluateFeynman({
     } catch (error) {
       // Mid-flight cloud failure → Deterministic result, "Offline mode" (Req 3.5, 8.2).
       console.error('[Feynman] Cloud tier failed, falling back to deterministic:', error);
-      const deterministic = evaluateFeynmanTier3({ explanation, chunks, selfRating, topK, keyTermLimit });
+      const deterministic = evaluateFeynmanTier3({ explanation, chunks: offlineChunks, selfRating, topK, keyTermLimit: offlineLimit });
       result = relabelOffline(deterministic, TIER_LABEL[TIER.DETERMINISTIC] ?? 'Offline mode');
     }
   } else {
     // Edge/Deterministic: no edge Feynman provider in MVP, so the deterministic
     // evaluator serves both paths. (Edge is reserved for a future on-device SLM.)
-    const deterministic = evaluateFeynmanTier3({ explanation, chunks, selfRating, topK, keyTermLimit });
+    const deterministic = evaluateFeynmanTier3({ explanation, chunks: offlineChunks, selfRating, topK, keyTermLimit: offlineLimit });
     result = {
       ...deterministic,
       tierLabel: TIER_LABEL[TIER.DETERMINISTIC] ?? 'Offline mode',
@@ -229,7 +238,7 @@ export async function evaluateFeynman({
     await updateKnowledgeState(documentId, topic, mastery);
   }
 
-  return { ...result, attemptId, mastery };
+  return { ...result, sourceText, attemptId, mastery };
 }
 
 export { FEYNMAN_SELF_RATINGS };

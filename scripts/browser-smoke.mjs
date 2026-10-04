@@ -73,7 +73,7 @@ try {
   assert.equal(await page.getByLabel(/I reviewed the redacted previews/).isChecked(), false, 'editing resets review');
   await page.getByLabel(/I reviewed the redacted previews/).check();
   await page.getByRole('button', { name: 'Check with AI', exact: true }).click();
-  await page.getByRole('alert').getByText(/Enable Cloud AI and sign in/).waitFor();
+  await page.getByRole('alert').getByText(/Turn on Cloud AI and enter your access code/).waitFor();
   await page.getByRole('button', { name: 'Back to document', exact: true }).click();
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   page.once('dialog', dialog => dialog.accept());
@@ -84,7 +84,7 @@ try {
   assert.equal(unknownApi.status(), 404, 'static site never masquerades as a healthy API');
   assert.deepEqual(external, [], 'offline-only build makes no external content requests');
   assert.deepEqual(errors, [], 'no browser runtime errors');
-  console.log('Browser smoke passed: mobile UI, offline PDF/reference import, redaction, evidence, persistence, consent reset, sign-in guard, deletion, and API 404.');
+  console.log('Browser smoke passed: mobile UI, offline PDF/reference import, redaction, evidence, persistence, consent reset, access-code guard, deletion, and API 404.');
 } finally {
   clearTimeout(deadline);
   await browser?.close();

@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { diagnose, shouldDiagnose } from '../../services/diagnosis/index.js';
+import PageHeader from '../../components/layout/PageHeader.jsx';
+import TierBadge from '../../components/shared/TierBadge.jsx';
 import { getDocument, getKnowledgeState, getQuizzesByDocument } from '../../db/database.js';
 import { deriveDashboard, seriesLabelFor } from '../../services/dashboard/learningCurve.js';
 import LearningCurve from '../../components/LearningCurve.jsx';
@@ -87,29 +90,42 @@ export default function StudentDashboard() {
     [knowledgeState],
   );
 
+  // If the learning curve shows this way of studying is not working (latest
+  // score under 70%, or scores stuck), suggest another technique. Uses Cloud AI
+  // when it is on, otherwise the built-in offline rules.
+  const [suggestion, setSuggestion] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const pts = dashboard.points;
+    setSuggestion(null);
+    if (pts.length === 0) return undefined;
+    const history = pts.map(p => p.mastery);
+    const last = pts[pts.length - 1];
+    if (!shouldDiagnose({ quizScore: last.mastery, masteryHistory: history })) return undefined;
+    const weakTopics = Object.entries(knowledgeState)
+      .filter(([, st]) => (masteryOf(st) ?? 0) < 0.6)
+      .map(([topic]) => topic);
+    diagnose({
+      documentId: docId,
+      currentHabit: last.technique === 'plain' ? null : last.technique,
+      quizScore: last.mastery,
+      masteryHistory: history,
+      weakTopics,
+    })
+      .then(result => { if (!cancelled && result.action === 'switch') setSuggestion(result); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [dashboard, knowledgeState, docId]);
+
   const header = (
-    <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-      <div className="max-w-2xl mx-auto px-4 h-14 flex items-center gap-3">
-        <button
-          onClick={() => navigate(`/student/document/${docId}`)}
-          className="text-gray-500 hover:text-gray-700 text-xl min-h-[48px] min-w-[48px] flex items-center justify-center"
-          aria-label="Back to document"
-        >
-          ‹
-        </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="font-bold text-gray-800 truncate">Dashboard</h1>
-          {doc?.title && <p className="text-xs text-gray-500 truncate">{doc.title}</p>}
-        </div>
-      </div>
-    </header>
+    <PageHeader eyebrow={doc?.title} title="Dashboard" onBack={() => navigate(`/student/document/${docId}`)} backLabel="Back to document" />
   );
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
         {header}
-        <main className="max-w-2xl mx-auto px-4 py-8">
+        <main className="max-w-[816px] mx-auto px-4 sm:px-8 py-8">
           <LoadingSpinner message="Loading your dashboard..." />
         </main>
       </div>
@@ -121,7 +137,7 @@ export default function StudentDashboard() {
   return (
     <div className="min-h-screen bg-gray-50">
       {header}
-      <main className="max-w-2xl mx-auto px-4 py-6" aria-live="polite">
+      <main className="max-w-[816px] mx-auto px-4 sm:px-8 py-5 sb-enter" aria-live="polite">
         {error && <div className="mb-4"><ErrorMessage message={error} /></div>}
 
         {/* ── Section 1: learning curve (Req 7.1, 7.2) ─────────────────────── */}
@@ -138,7 +154,6 @@ export default function StudentDashboard() {
           ) : (
             // Encouraging empty state — never an error (Req 7.4).
             <div className="bg-white rounded-2xl p-8 text-center border border-gray-100 shadow-sm">
-              <div className="text-5xl mb-3" aria-hidden="true">🌱</div>
               <h3 className="font-bold text-gray-800 mb-1">Your curve starts with your first quiz</h3>
               <p className="text-gray-500 text-sm">
                 Take a quiz or run a review session and your learning curve will grow here —
@@ -148,18 +163,32 @@ export default function StudentDashboard() {
                 onClick={() => navigate(`/student/document/${docId}/quiz`)}
                 className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl min-h-[48px] transition-colors"
               >
-                ✏️ Take a quiz
+                Take a quiz
               </button>
             </div>
           )}
         </section>
+
+        {suggestion && (
+          <section className="rounded-[18px] p-5 mt-4" style={{ background: 'var(--sb-amber-bg)' }} role="status" aria-live="polite">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <h2 className="sb-display text-base" style={{ color: 'var(--sb-amber-ink)' }}>Try a different way to study</h2>
+              <TierBadge tier={suggestion.tier} />
+            </div>
+            <p className="text-sm sb-ink leading-relaxed">{suggestion.reason}</p>
+            {suggestion.evidence && <p className="text-xs sb-body mt-2">{suggestion.evidence}</p>}
+            {suggestion.expectedImprovement && <p className="text-xs sb-body mt-2">{suggestion.expectedImprovement}</p>}
+            {suggestion.cta && (
+              <Link to={suggestion.cta.to} className="sb-btn mt-4 w-full">{suggestion.cta.label}</Link>
+            )}
+          </section>
+        )}
 
         {/* ── Section 2: current per-topic mastery (Req 7.3) ───────────────── */}
         <section className="space-y-3 mt-8">
           <h2 className="font-bold text-gray-800 text-lg">Topic mastery</h2>
           {masteryTopics.length === 0 ? (
             <div className="bg-white rounded-xl p-6 text-center border border-gray-100">
-              <div className="text-4xl mb-2" aria-hidden="true">📊</div>
               <p className="text-gray-500 text-sm">No mastery data yet — take a quiz to start tracking.</p>
             </div>
           ) : (

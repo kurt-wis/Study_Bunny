@@ -1,5 +1,7 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { PrefsProvider } from './context/Prefs.jsx';
+import AppShell from './components/layout/AppShell.jsx';
 
 // Pages
 import StudentHome from './pages/student/StudentHome.jsx';
@@ -9,28 +11,35 @@ import StudentChat from './pages/student/StudentChat.jsx';
 import StudentReview from './pages/student/StudentReview.jsx';
 import StudentDashboard from './pages/student/StudentDashboard.jsx';
 import StudentVerify from './pages/student/StudentVerify.jsx';
-import AuthCallback from './pages/AuthCallback.jsx';
+import StudentProfile from './pages/student/StudentProfile.jsx';
+import StudyRedirect from './pages/student/StudyRedirect.jsx';
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900">
-      <Routes>
-        {/* Student home is the landing page */}
-        <Route path="/" element={<Navigate to="/student" replace />} />
+    <PrefsProvider>
+      <AppShell>
+        <Routes>
+          {/* Student home is the landing page */}
+          <Route path="/" element={<Navigate to="/student" replace />} />
 
-        {/* Student Mode */}
-        <Route path="/student" element={<StudentHome />} />
-        <Route path="/student/document/:id" element={<StudentDocument />} />
-        <Route path="/student/document/:id/quiz" element={<StudentQuiz />} />
-        <Route path="/student/document/:id/chat" element={<StudentChat />} />
-        <Route path="/student/document/:id/review" element={<StudentReview />} />
-        <Route path="/student/document/:id/dashboard" element={<StudentDashboard />} />
-        <Route path="/student/document/:id/verify" element={<StudentVerify />} />
-        <Route path="/auth/callback" element={<AuthCallback />} />
+          {/* Workspace: Home, Review, Quiz, Profile */}
+          <Route path="/student" element={<StudentHome />} />
+          <Route path="/student/review" element={<StudentReview />} />
+          <Route path="/student/quiz" element={<StudyRedirect mode="quiz" />} />
+          <Route path="/student/profile" element={<StudentProfile />} />
 
-        {/* Fallback */}
-        <Route path="*" element={<Navigate to="/student" replace />} />
-      </Routes>
-    </div>
+          {/* Per-document screens */}
+          <Route path="/student/document/:id" element={<StudentDocument />} />
+          <Route path="/student/document/:id/quiz" element={<StudentQuiz />} />
+          <Route path="/student/document/:id/chat" element={<StudentChat />} />
+          <Route path="/student/document/:id/review" element={<StudentReview />} />
+          <Route path="/student/document/:id/dashboard" element={<StudentDashboard />} />
+          <Route path="/student/document/:id/verify" element={<StudentVerify />} />
+
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/student" replace />} />
+        </Routes>
+      </AppShell>
+    </PrefsProvider>
   );
 }
